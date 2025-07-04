@@ -1,0 +1,11 @@
+<gpx creator="GPS Visualizer https://www.gpsvisualizer.com/" version="1.0">
+  <wpt lat="45.44283" lon="-121.72904"><ele>1374</ele><name>Vista Ridge Trailhead</name><sym>Trail Head</sym></wpt>
+  <wpt lat="45.41000" lon="-121.71349"><ele>1777</ele><name>Wy'East Basin</name></wpt>
+  <wpt lat="45.41124" lon="-121.70404"><ele>1823</ele><name>Dollar Lake</name></wpt>
+  <wpt lat="45.39260" lon="-121.69937"><ele>2394</ele><name>Barrett Spur</name><sym>Summit</sym></wpt>
+  <trk>
+    <name>Barrett Spur 1</name>
+    <extensions>
+      <line xmlns="http://www.topografix.com/GPX/gpx_style/0/2">
+        <color>9900ff</color>
+      </line>
