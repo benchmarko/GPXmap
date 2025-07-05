@@ -3,30 +3,17 @@ import L from 'leaflet';
 import { gpx } from '@tmcw/togeojson';
 import type { Feature, FeatureCollection, Point } from 'geojson';
 
+const map = L.map('map');
+
 let waypointGroup: L.FeatureGroup | null = null;
 
-// Replace #app with our UI
-const app = document.querySelector<HTMLDivElement>('#app');
-if (app) {
-    app.innerHTML = `
-    <h1>GPX Waypoint Viewer</h1>
-    <input type="file" id="gpxFile" accept=".gpx,application/gpx+xml" />
-    <div id="xmlError" style="color: red; padding: 1em;"></div>
-    <div id="map" style="height: 500px; margin-top: 1em;"></div>
-  `;
-}
-
-// Initialize Leaflet map
-const map = L.map('map').setView([0, 0], 2);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors'
-}).addTo(map);
-
 // Handle file upload
-document.getElementById('gpxFile')?.addEventListener('change', async (event) => {
+async function onGpxFileChange(event: Event) {
     const startTime = Date.now();
     const input = event.target as HTMLInputElement;
-    if (!input.files || input.files.length === 0) return;
+    if (!input.files || input.files.length === 0) {
+        return;
+    }
     const file = input.files[0];
     const text = await file.text();
     const parser = new DOMParser();
@@ -43,13 +30,6 @@ document.getElementById('gpxFile')?.addEventListener('change', async (event) => 
     }
 
     const geojson: FeatureCollection = gpx(xml);
-
-    /*
-    // Listen for map moveend event (fires after fitBounds animation completes)
-    map.once('moveend', () => {
-        console.log(`Debug: Map rendering done (fitBounds complete, waypoints visible) after ${Date.now() - startTime} ms`);
-    });
-    */
 
     // Remove existing markers (remove previous feature group if present)
     // Inside your file upload handler, after parsing geojson:
@@ -72,4 +52,15 @@ document.getElementById('gpxFile')?.addEventListener('change', async (event) => 
     }
     const endTime = Date.now();
     console.log(`Processed GPX file with ${waypoints.length} waypoint(s) in ${endTime - startTime} ms`);
-});
+}
+
+function main() {
+    // Initialize Leaflet map
+    map.setView([0, 0], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    document.getElementById('gpxFile')?.addEventListener('change', onGpxFileChange);
+}
+main();
