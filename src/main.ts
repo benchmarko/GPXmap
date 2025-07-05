@@ -37,19 +37,38 @@ async function onGpxFileChange(event: Event) {
         map.removeLayer(waypointGroup);
     }
 
-    const waypoints = geojson.features.filter((f: Feature) => f.geometry?.type === 'Point');
-    if (waypoints.length > 0) {
-        const markers = waypoints.map((wpt: Feature) => {
-            const coords = (wpt.geometry as Point).coordinates;
-            const [lng, lat] = coords;
-            return L.marker([lat, lng]).bindPopup(wpt.properties?.name || 'Waypoint');
-        });
-        waypointGroup = L.featureGroup(markers).addTo(map);
-        map.fitBounds(waypointGroup.getBounds().pad(0.5));
-    } else {
-        alert('No waypoints found in this GPX file.');
-        waypointGroup = null;
-    }
+ const waypoints = geojson.features.filter((f: Feature) => f.geometry?.type === 'Point');
+if (waypoints.length > 0) {
+    const popup = L.popup(
+        {
+            offset: L.point(0, -30) // Adjust -30 to move the popup higher above the marker
+        }
+    );
+    const markers = waypoints.map((wpt: Feature) => {
+        const coords = (wpt.geometry as Point).coordinates;
+        const [lng, lat] = coords;
+        const marker = L.marker([lat, lng]);
+        // Store the name as marker data for easy access in the click handler
+        (marker as any).waypointName = wpt.properties?.name || 'Waypoint';
+        return marker;
+    });
+    waypointGroup = L.featureGroup(markers).addTo(map);
+
+    // Attach a single popup to the feature group
+    waypointGroup.on('click', (e: L.LeafletMouseEvent) => {
+        const marker = e.propagatedFrom as L.Marker;
+        const name = (marker as any).waypointName;
+        popup
+            .setLatLng(e.latlng) //.setLatLng(marker.getLatLng()) //.setLatLng(e.latlng)
+            .setContent(name)
+            .openOn(map);
+    });
+
+    map.fitBounds(waypointGroup.getBounds().pad(0.5));
+} else {
+    alert('No waypoints found in this GPX file.');
+    waypointGroup = null;
+}
     const endTime = Date.now();
     console.log(`Processed GPX file with ${waypoints.length} waypoint(s) in ${endTime - startTime} ms`);
 }
