@@ -3,6 +3,8 @@ import L from 'leaflet';
 import { gpx } from '@tmcw/togeojson';
 import type { Feature, FeatureCollection, Point } from 'geojson';
 
+let waypointGroup: L.FeatureGroup | null = null;
+
 // Replace #app with our UI
 const app = document.querySelector<HTMLDivElement>('#app');
 if (app) {
@@ -42,29 +44,31 @@ document.getElementById('gpxFile')?.addEventListener('change', async (event) => 
 
     const geojson: FeatureCollection = gpx(xml);
 
-    // Remove existing markers
-    map.eachLayer(layer => {
-        if ((layer as any).options && (layer as any).options.pane === 'markerPane') {
-            map.removeLayer(layer);
-        }
+    /*
+    // Listen for map moveend event (fires after fitBounds animation completes)
+    map.once('moveend', () => {
+        console.log(`Debug: Map rendering done (fitBounds complete, waypoints visible) after ${Date.now() - startTime} ms`);
     });
+    */
 
-    // Add waypoints as markers
+    // Remove existing markers (remove previous feature group if present)
+    // Inside your file upload handler, after parsing geojson:
+    if (waypointGroup) {
+        map.removeLayer(waypointGroup);
+    }
+
     const waypoints = geojson.features.filter((f: Feature) => f.geometry?.type === 'Point');
-    waypoints.forEach((wpt: Feature) => {
-        const coords = (wpt.geometry as Point).coordinates;
-        const [lng, lat] = coords;
-        L.marker([lat, lng]).addTo(map)
-            .bindPopup(wpt.properties?.name || 'Waypoint');
-    });
     if (waypoints.length > 0) {
-        const group = L.featureGroup(waypoints.map((wpt: Feature) => {
+        const markers = waypoints.map((wpt: Feature) => {
             const coords = (wpt.geometry as Point).coordinates;
-            return L.marker([coords[1], coords[0]]);
-        }));
-        map.fitBounds(group.getBounds().pad(0.5));
+            const [lng, lat] = coords;
+            return L.marker([lat, lng]).bindPopup(wpt.properties?.name || 'Waypoint');
+        });
+        waypointGroup = L.featureGroup(markers).addTo(map);
+        map.fitBounds(waypointGroup.getBounds().pad(0.5));
     } else {
         alert('No waypoints found in this GPX file.');
+        waypointGroup = null;
     }
     const endTime = Date.now();
     console.log(`Processed GPX file with ${waypoints.length} waypoint(s) in ${endTime - startTime} ms`);
