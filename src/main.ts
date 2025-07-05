@@ -1,11 +1,11 @@
 import './style.css';
 import L from 'leaflet';
-//import { gpx } from '@tmcw/togeojson';
-//import type { Feature, FeatureCollection, Point } from 'geojson';
+import 'leaflet.markercluster';
+import type { MarkerClusterGroup } from 'leaflet';
 
 const map = L.map('map');
 
-let waypointGroup: L.FeatureGroup | null = null;
+let waypointGroup: MarkerClusterGroup | null = null;
 
 // Handle file upload
 async function onGpxFileChange(event: Event) {
@@ -54,7 +54,9 @@ async function onGpxFileChange(event: Event) {
         markers.push(marker);
     }
 
-    waypointGroup = L.featureGroup(markers).addTo(map);
+    waypointGroup = L.markerClusterGroup();
+    markers.forEach(marker => waypointGroup!.addLayer(marker));
+    waypointGroup.addTo(map);
 
     waypointGroup.on('click', (e: L.LeafletMouseEvent) => {
         const marker = e.propagatedFrom as L.Marker;
