@@ -2,6 +2,7 @@
 @import 'leaflet.markercluster/dist/MarkerCluster.css';
 @import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 
+/*
 :root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
@@ -26,24 +27,16 @@ a {
 a:hover {
   color: #535bf2;
 }
+*/
 
 body {
   font-family: system-ui, sans-serif;
   margin: 1em;
   padding: 0;
   background: #f8f9fa;
-  /* display: flex; */
-  /* place-items: center; */
   min-width: 320px;
   /* min-height: 100vh; */
 }
-
-/*
-h1 {
-  font-size: 2em;
-  margin-bottom: 1em;
-}
-*/
 
 #app {
   max-width: 800px;
@@ -51,7 +44,7 @@ h1 {
 }
 
 #waypointInfo {
-  white-space: pre-wrap;
+  /* white-space: pre-wrap; */
   margin: 0;
   /* max-height:120px; */
   height: 100%;
@@ -72,6 +65,7 @@ h1 {
 }
 */
 
+/*
 .logo {
   height: 6em;
   padding: 1.5em;
@@ -115,6 +109,7 @@ button:focus,
 button:focus-visible {
   outline: 4px auto -webkit-focus-ring-color;
 }
+  */
 
 input[type="file"] {
   margin-bottom: 1em;
