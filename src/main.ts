@@ -10,18 +10,22 @@ let waypointGroup: MarkerClusterGroup | null = null;
 // Handle file upload
 async function onGpxFileChange(event: Event) {
     const startTime = Date.now();
-    const input = event.target as HTMLInputElement;
-    if (!input.files || input.files.length === 0) return;
-    const file = input.files[0];
+    const inputElement = event.target as HTMLInputElement;
+    if (!inputElement.files || inputElement.files.length === 0) return;
+    const file = inputElement.files[0];
     const text = await file.text();
     const parser = new DOMParser();
     const xml = parser.parseFromString(text, 'application/xml');
 
+    const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement;
     const errorNode = xml.querySelector("parsererror");
-    const textContent = errorNode ? `Error parsing GPX file: ${errorNode.textContent}` : '';
-    const xmlErrorDiv = document.getElementById('xmlError');
-    if (xmlErrorDiv) xmlErrorDiv.innerText = textContent;
-    if (textContent) return;
+    if (errorNode) {
+        waypointInfo.innerHTML = `<span style="color: red">Error parsing GPX file: ${errorNode.textContent}</span>`;
+        inputElement.style = 'color:red';
+        return;
+    }
+    waypointInfo.innerHTML = '';
+    inputElement.style = '';
 
     // Remove previous markers
     if (waypointGroup) {
@@ -61,21 +65,22 @@ async function onGpxFileChange(event: Event) {
     waypointGroup.on('click', (e: L.LeafletMouseEvent) => {
         const marker = e.propagatedFrom as L.Marker;
         const data = (marker as any).waypointData;
-        const textarea = document.getElementById('waypointInfo') as HTMLTextAreaElement | null;
-        if (textarea) {
-            textarea.value =
-                `Name: ${data.name}\nLat: ${data.lat}, Lng: ${data.lon}\nDescription: ${data.desc}\n\nCache Info:\n${data.cacheInfo || 'No cache info'}`;
-        }
+        //const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement | null;
+        waypointInfo.innerHTML =
+            `Name: ${data.name}\nLat: ${data.lat}, Lng: ${data.lon}\nDescription: ${data.desc}\n\nCache Info:\n${data.cacheInfo || 'No cache info'}`;
+
         const html = `
-            <strong>${data.name}</strong><br>
-            <small>Lat: ${data.lat.toFixed(6)}, Lng: ${data.lon.toFixed(6)}</small>
-            <details style="margin-top:4px;">
-                <summary>More info</summary>
-                <div style="margin-top:4px;">
-                    <em>${data.desc}</em>
-                    <pre style="white-space:pre-wrap;margin:0;">${data.cacheInfo}</pre>
-                </div>
-            </details>
+<strong>${data.name}</strong><br>
+<small>Lat: ${data.lat.toFixed(6)}, Lng: ${data.lon.toFixed(6)}</small>
+<details style="margin-top:4px;">
+    <summary>More info</summary>
+    <div style="margin-top:4px;">
+        <em>${data.desc}</em>
+        <div style="white-space:pre-wrap;margin:0;max-height:120px;overflow:auto;border:1px solid #ccc;padding:4px;background:#fafafa;">
+            ${data.cacheInfo}
+        </div>
+    </div>
+</details>
         `;
         popup
             .setLatLng(marker.getLatLng())
@@ -97,7 +102,7 @@ function main() {
     // Initialize Leaflet map
     map.setView([0, 0], 2);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors'
+        attribution: '© OpenStreetMap'
     }).addTo(map);
 
     document.getElementById('gpxFile')?.addEventListener('change', onGpxFileChange);
