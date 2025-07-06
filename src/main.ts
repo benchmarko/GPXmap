@@ -3,11 +3,59 @@ import L from 'leaflet';
 import 'leaflet.markercluster';
 import type { MarkerClusterGroup } from 'leaflet';
 
+
+type WaypointDataType = {
+    name: string;
+    lat: number;
+    lon: number;
+    type: string;
+    desc: string;
+    cacheInfo: string;
+};
+
+type WaypointDataMapType = Record<string, WaypointDataType>;
+
+type MarkerType = L.Marker & {
+    waypointName: string;
+};
+
+const waypointDataMap: WaypointDataMapType = {}; // Store markers data for filtering
+
 const map = L.map('map');
 const popup = L.popup({ offset: L.point(0, -30) });
-let waypointGroup: MarkerClusterGroup | null = null;
-const allMarkers: L.Marker[] = []; // Store all markers globally for filtering
 
+let waypointGroup: MarkerClusterGroup | null = null;
+
+// Marker pool for reuse
+const markerPool: MarkerType[] = [];
+
+function deleteAllItems(items: Record<string, unknown>) {
+    Object.keys(items).forEach(key => delete items[key]);
+}
+
+// Get a marker from the pool or create a new one
+function getPooledMarker(lat: number, lon: number, icon: L.DivIcon, name: string): MarkerType {
+    let marker: MarkerType;
+    if (markerPool.length > 0) {
+        marker = markerPool.pop()!;
+        marker.setLatLng([lat, lon]);
+        marker.setIcon(icon);
+    } else {
+        marker = L.marker([lat, lon], { icon }) as MarkerType;
+    }
+    marker.waypointName = name;
+    return marker;
+}
+
+// When clearing markers, return them to the pool
+function clearMarkersFromGroup(group: MarkerClusterGroup) {
+    group.eachLayer(layer => {
+        if (layer instanceof L.Marker) {
+            markerPool.push(layer as MarkerType);
+        }
+    });
+    group.clearLayers();
+}
 
 // Define custom icons for cache types
 const iconColors: Record<string, string> = {
@@ -43,17 +91,22 @@ function getIcon(cacheType: string) {
 }
 
 // Helper to render (filtered) markers
-function renderMarkers(markers: L.Marker[]) {
+function renderMarkers(markersData: WaypointDataType[]) {
     if (waypointGroup) {
+        clearMarkersFromGroup(waypointGroup);
         map.removeLayer(waypointGroup);
     }
     waypointGroup = L.markerClusterGroup();
-    markers.forEach(marker => waypointGroup!.addLayer(marker));
+
+    markersData.forEach(data => {
+        const marker = getPooledMarker(data.lat, data.lon, getIcon(data.type), data.name);
+        waypointGroup!.addLayer(marker);
+    });
     waypointGroup.addTo(map);
 
     waypointGroup.on('click', (e: L.LeafletMouseEvent) => {
-        const marker = e.propagatedFrom as L.Marker;
-        const data = (marker as any).waypointData;
+        const marker = e.propagatedFrom as MarkerType;
+        const data = waypointDataMap[marker.waypointName];
         const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement;
         waypointInfo.innerHTML = `Name: ${data.name}<br>
 Lat: ${data.lat}, Lng: ${data.lon}<br>
@@ -80,7 +133,7 @@ ${data.cacheInfo || 'No cache info'}`;
             .openOn(map);
     });
 
-    if (markers.length > 0) {
+    if (markersData.length > 0) {
         map.fitBounds(waypointGroup.getBounds().pad(0.5));
     }
 }
@@ -88,12 +141,12 @@ ${data.cacheInfo || 'No cache info'}`;
 // Filter logic
 function filterWaypoints(query: string) {
     const q = query.trim().toLowerCase();
+    const waypointData = Object.values(waypointDataMap);
     if (!q) {
-        renderMarkers(allMarkers);
+        renderMarkers(waypointData);
         return;
     }
-    const filtered = allMarkers.filter(marker => {
-        const data = (marker as any).waypointData;
+    const filtered = waypointData.filter(data => {
         return (
             data.name.toLowerCase().includes(q) ||
             data.desc.toLowerCase().includes(q) ||
@@ -126,14 +179,16 @@ async function onGpxFileChange(event: Event) {
     waypointInfo.innerHTML = '';
     inputElement.style = '';
 
+    /*
     // Remove previous markers
     if (waypointGroup) {
         map.removeLayer(waypointGroup);
     }
+    */
 
     const wpts = Array.from(xml.getElementsByTagName('wpt'));
-    //const allMarkers: L.Marker[] = [];
-    allMarkers.length = 0; // Clear previous markers
+
+    deleteAllItems(waypointDataMap); // Reset waypoint data map
 
     for (const wpt of wpts) {
         const lat = parseFloat(wpt.getAttribute('lat') || '0');
@@ -153,28 +208,18 @@ async function onGpxFileChange(event: Event) {
             cacheInfo = `Cache Name: ${cacheName}<br>\nType: ${cacheType}<br>\nContainer: ${container}<br>\nDescription: ${longDesc}`;
         }
 
-        const marker = L.marker([lat, lon], {
-            icon: getIcon(type)
-        });
-
-        // Store all info on marker for easy access
-        (marker as any).waypointData = { name, lat, lon, desc, cacheInfo };
-        allMarkers.push(marker);
+        waypointDataMap[name] = { name, lat, lon, type, desc, cacheInfo };
     }
 
-    waypointGroup = L.markerClusterGroup();
-    allMarkers.forEach(marker => waypointGroup!.addLayer(marker));
-    waypointGroup.addTo(map);
-
-    if (allMarkers.length > 0) {
-        //map.fitBounds(waypointGroup.getBounds().pad(0.5));
-        renderMarkers(allMarkers);
+    if (wpts.length > 0) {
+        const waypointSearch = document.getElementById('waypointSearch') as HTMLInputElement;
+        filterWaypoints(waypointSearch.value);
     } else {
         alert('No waypoints found in this GPX file.');
         waypointGroup = null;
     }
     const endTime = Date.now();
-    console.log(`Processed GPX file with ${allMarkers.length} waypoint(s) in ${endTime - startTime} ms`);
+    console.log(`Processed GPX file with ${wpts.length} waypoint(s) in ${endTime - startTime} ms`);
 }
 
 function main() {
@@ -185,11 +230,11 @@ function main() {
     }).addTo(map);
 
     document.getElementById('gpxFile')?.addEventListener('change', onGpxFileChange);
-    
+
     // Attach search event
-document.getElementById('waypointSearch')?.addEventListener('input', (e) => {
-    const value = (e.target as HTMLInputElement).value;
-    filterWaypoints(value);
-});
+    document.getElementById('waypointSearch')?.addEventListener('input', (e) => {
+        const value = (e.target as HTMLInputElement).value;
+        filterWaypoints(value);
+    });
 }
 main();
