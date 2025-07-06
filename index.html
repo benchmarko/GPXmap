@@ -10,12 +10,17 @@
 
 <body>
   <div id="app">
-    <div>GC Waypoint Viewer</div>
-    <input type="file" id="gpxFile" accept=".gpx,application/gpx+xml" />
-    <input type="text" id="waypointSearch" placeholder="Search waypoints by name or description" />
-    <div id="map" style="height: 500px; margin-top: 1em;"></div>
-    <div id="waypointInfo" style="width: 100%; height: 200px; margin-top: 1em;"
-        placeholder="Waypoint info will appear here...">
+    <div id="top">
+      <div>GC Waypoint Viewer</div>
+      <input type="file" id="gpxFile" accept=".gpx,application/gpx+xml" />
+      <span>
+        <input type="text" id="waypointSearch" placeholder="Search waypoints" />
+        <button id="waypointSearchClear" title="Clear search">x</button>
+        <span id="waypointCount" title="Waypoint Count">0</span>
+      </span>
+    </div>
+    <div id="map"></div>
+    <div id="waypointInfo" placeholder="Waypoint info will appear here...">
     </div>
   </div>
   <script type="module" src="/src/main.ts"></script>

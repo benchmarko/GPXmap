@@ -95,7 +95,6 @@ function renderMarkers(markersData: WaypointDataType[]) {
         clearMarkersFromGroup(waypointGroup);
         map.removeLayer(waypointGroup);
     }
-    //waypointGroup = L.markerClusterGroup();
 
     if (markersData.length > 0) {
         markersData.forEach(data => {
@@ -103,8 +102,6 @@ function renderMarkers(markersData: WaypointDataType[]) {
             waypointGroup!.addLayer(marker);
         });
         waypointGroup.addTo(map);
-        //waypointGroup.on('click', onWaypointGroupClick);
-
         map.fitBounds(waypointGroup.getBounds().pad(0.5));
     }
 }
@@ -113,8 +110,10 @@ function renderMarkers(markersData: WaypointDataType[]) {
 function filterWaypoints(query: string) {
     const q = query.trim().toLowerCase();
     const waypointData = Object.values(waypointDataMap);
+    const waypointCount = document.getElementById('waypointCount') as HTMLSpanElement;
     if (!q) {
         renderMarkers(waypointData);
+        waypointCount.innerText = String(waypointData.length);
         return;
     }
     const filtered = waypointData.filter(data => {
@@ -125,6 +124,7 @@ function filterWaypoints(query: string) {
         );
     });
     renderMarkers(filtered);
+    waypointCount.innerText = `${filtered.length} / ${waypointData.length}`;
 }
 
 function onWaypointGroupClick(e: L.LeafletMouseEvent) {
@@ -231,15 +231,22 @@ function main() {
         attribution: '© OpenStreetMap'
     }).addTo(map);
 
-    //waypointGroup.addTo(map);
     waypointGroup.on('click', onWaypointGroupClick);
 
-    document.getElementById('gpxFile')?.addEventListener('change', onGpxFileChange);
+    const gpxFile = document.getElementById('gpxFile') as HTMLInputElement;
+    gpxFile.addEventListener('change', onGpxFileChange);
 
     // Attach search event
-    document.getElementById('waypointSearch')?.addEventListener('input', (e) => {
+    const waypointSearch = document.getElementById('waypointSearch') as HTMLInputElement;
+    waypointSearch.addEventListener('input', (e) => {
         const value = (e.target as HTMLInputElement).value;
         filterWaypoints(value);
+    });
+
+    const waypointSearchClear = document.getElementById('waypointSearchClear') as HTMLButtonElement;
+    waypointSearchClear.addEventListener('click', (_e) => {
+        waypointSearch.value = '';
+        filterWaypoints(waypointSearch.value);
     });
 }
 main();
