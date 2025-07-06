@@ -1,6 +1,8 @@
 // ZipFile.ts - ZIP file handling
 // (c) Marco Vieth, 2019
 //
+// Idea based on: https://github.com/frash23/jzsip/blob/master/jzsip.js (and Cpcemu: zip.cpp)
+//
 interface ZipFileOptions {
     data: Uint8Array,
     zipName: string // for error messages
@@ -12,18 +14,18 @@ type CodeType = {
 };
 
 interface CentralDirFileHeader {
-    signature: number
-    version: number // version needed to extract (minimum)
-    flag: number // General purpose bit flag
-    compressionMethod: number // compression method
-    modificationTime: number // File last modification time (DOS time)
-    crc: number // CRC-32 of uncompressed data
-    compressedSize: number // compressed size
-    size: number // Uncompressed size
-    fileNameLength: number // file name length
-    extraFieldLength: number // extra field length
-    fileCommentLength: number // file comment length
-    localOffset: number // relative offset of local file header
+    readonly signature: number
+    readonly version: number // version needed to extract (minimum)
+    readonly flag: number // General purpose bit flag
+    readonly compressionMethod: number // compression method
+    readonly modificationTime: number // File last modification time (DOS time)
+    readonly crc: number // CRC-32 of uncompressed data
+    readonly compressedSize: number // compressed size
+    readonly size: number // Uncompressed size
+    readonly fileNameLength: number // file name length
+    readonly extraFieldLength: number // extra field length
+    readonly fileCommentLength: number // file comment length
+    readonly localOffset: number // relative offset of local file header
     name: string
     isDirectory: boolean
     extra: Uint8Array
@@ -32,15 +34,16 @@ interface CentralDirFileHeader {
     dataStart: number
 }
 
-type ZipDirectoryType = { [k in string]: CentralDirFileHeader }
+type ZipDirectoryType = Record<string, CentralDirFileHeader>
 
 interface EndOfCentralDir {
-    signature: number
-    entries: number // total number of central directory records
-    cdfhOffset: number // offset of start of central directory, relative to start of archive
-    cdSize: number // size of central directory (just for information)
+    readonly signature: number
+    readonly entries: number // total number of central directory records
+    readonly cdfhOffset: number // offset of start of central directory, relative to start of archive
+    readonly cdSize: number // size of central directory (just for information)
 }
 
+const textDecoder = typeof TextDecoder !== "undefined" ? new TextDecoder("utf-8", {fatal : true}) : null;
 
 export class ZipFile {
     private readonly options: ZipFileOptions;
@@ -83,7 +86,7 @@ export class ZipFile {
         return data.slice ? data.slice(begin, end) : data.subarray(begin, end); // array.slice on Uint8Array not for IE11
     }
 
-    private readUTF(offset: number, len: number) {
+    private readUTFFromCharCode(offset: number, len: number) {
         const callSize = 25000; // use call window to avoid "maximum call stack error" for e.g. size 336461
         let out = "";
 
@@ -96,6 +99,14 @@ export class ZipFile {
             len -= chunkLen;
         }
         return out;
+    }
+
+    private readUTF(offset: number, len: number) {
+        if (textDecoder) {
+            return textDecoder.decode(this.subArr(offset, len));
+        }
+        // fallback for environments without TextDecoder
+        return this.readUTFFromCharCode(offset, len);
     }
 
     private readUInt(i: number) {
@@ -525,9 +536,13 @@ export class ZipFile {
         } else {
             throw this.composeError(Error(), "Zip: readData: compression method not supported:" + cdfh.compressionMethod, "", 0);
         }
+        /*
         if (dataUTF8.length !== cdfh.size) { // assert
-            console.error("Zip: readData: different length 2!");
+            console.warn("Zip: readData: different length in cdfh:", dataUTF8.length, cdfh.size);
+            //https://www.geeksforgeeks.org/javascript/how-to-get-the-length-of-a-string-in-bytes-in-javascript/
+            //new TextEncoder().encode(dataUTF8).length or new Blob([dataUTF8]).size
         }
+        */
         return dataUTF8;
     }
 }

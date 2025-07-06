@@ -214,6 +214,19 @@ function parseGpxFile(text: string, name: string) {
             cacheInfo = `Cache Name: ${cacheName}<br>\nType: ${cacheType}<br>\nContainer: ${container}<br>\nDescription: ${longDesc}`;
         }
 
+        /*
+        // Test: check for UTF-8 chars >= 0x100
+        let utf8Chars = '';
+        for (let i = 0; i < desc.length; i++) {
+            if (desc.charCodeAt(i) >= 0x100) {
+                utf8Chars += desc.charAt(i);
+            }
+        }
+        if (utf8Chars) {
+            console.log("DDD:", name, `>${utf8Chars}<`);
+        }
+        */
+
         waypointDataMap[name] = { name, lat, lon, type, desc, cacheInfo };
     }
     return `Processed file ${name} with ${wpts.length} waypoints.`;
