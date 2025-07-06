@@ -2,6 +2,7 @@ import './style.css';
 import L from 'leaflet';
 import 'leaflet.markercluster';
 import type { MarkerClusterGroup } from 'leaflet';
+import { ZipFile } from "./ZipFile";
 
 
 type WaypointDataType = {
@@ -157,40 +158,43 @@ ${data.cacheInfo || 'No cache info'}`;
         .openOn(map);
 }
 
+function processZipFile(uint8Array: Uint8Array, name: string) {
+    const messages: string[] = []
+    const zip = new ZipFile({
+        data: uint8Array, // rather data
+        zipName: name
+    });
 
-// Handle file upload
-async function onGpxFileChange(event: Event) {
-    if (popup.isOpen()) {
-        popup.close();
+    const zipDirectory = zip.getZipDirectory(),
+        entries = Object.keys(zipDirectory);
+
+    for (let i = 0; i < entries.length; i += 1) {
+        const name2 = entries[i];
+
+        if (name2.startsWith("__MACOSX/")) { // MacOS X creates some extra folder in ZIP files
+            console.log("processZipFile: Ignoring file:", name2);
+        } else {
+            let data2: string | undefined;
+
+            data2 = zip.readData(name2);
+            if (data2) {
+                messages.push(parseGpxFile(data2, name2));
+            }
+        }
     }
-    const startTime = Date.now();
-    const inputElement = event.target as HTMLInputElement;
-    if (!inputElement.files || inputElement.files.length === 0) return;
-    const file = inputElement.files[0];
-    const text = await file.text();
+    return messages;
+}
+
+function parseGpxFile(text: string, name: string) {
     const parser = new DOMParser();
     const xml = parser.parseFromString(text, 'application/xml');
 
-    const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement;
     const errorNode = xml.querySelector("parsererror");
     if (errorNode) {
-        waypointInfo.innerHTML = `<span style="color: red">Error parsing GPX file: ${errorNode.textContent}</span>`;
-        inputElement.style = 'color:red';
-        return;
+        throw new Error(`Error parsing GPX file ${name}: ${errorNode.textContent}`);
     }
-    waypointInfo.innerHTML = '';
-    inputElement.style = '';
-
-    /*
-    // Remove previous markers
-    if (waypointGroup) {
-        map.removeLayer(waypointGroup);
-    }
-    */
 
     const wpts = Array.from(xml.getElementsByTagName('wpt'));
-
-    deleteAllItems(waypointDataMap); // Reset waypoint data map
 
     for (const wpt of wpts) {
         const lat = parseFloat(wpt.getAttribute('lat') || '0');
@@ -212,16 +216,51 @@ async function onGpxFileChange(event: Event) {
 
         waypointDataMap[name] = { name, lat, lon, type, desc, cacheInfo };
     }
+    return `Processed file ${name} with ${wpts.length} waypoints.`;
+}
 
-    if (wpts.length > 0) {
-        const waypointSearch = document.getElementById('waypointSearch') as HTMLInputElement;
-        filterWaypoints(waypointSearch.value);
-    } else {
-        waypointInfo.innerHTML = 'No waypoints found in this GPX file.';
-        inputElement.style = 'color:red';
+// Handle file upload
+async function onGpxFileChange(event: Event) {
+    if (popup.isOpen()) {
+        popup.close();
     }
+    const startTime = Date.now();
+    const inputElement = event.target as HTMLInputElement;
+    if (!inputElement.files || inputElement.files.length === 0) {
+        return;
+    }
+
+    deleteAllItems(waypointDataMap); // Reset waypoint data map
+    filterWaypoints("");
+
+    const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement;
+    waypointInfo.innerHTML = '';
+    inputElement.style = '';
+
+    for (const file of inputElement.files) {
+        try {
+            let text = '';
+            if (file.type === 'application/x-zip-compressed' || file.type === 'application/zip') {
+                // on Mac OS it is "application/zip"
+                const arrayBuffer = await file.arrayBuffer();
+                const messages = processZipFile(new Uint8Array(arrayBuffer), file.name);
+                waypointInfo.innerHTML += messages.map((message) => `<span>${message}</span><br>\n`).join('');
+            } else {
+                text = await file.text();
+                const message = parseGpxFile(text, file.name);
+                waypointInfo.innerHTML += `<span>${message}</span><br>\n`;
+            }
+        } catch (e) {
+            waypointInfo.innerHTML += `<span style="color: red">${e}</span><br>\n`;
+            inputElement.style = 'color:red';
+        }
+    }
+
+    const waypointSearch = document.getElementById('waypointSearch') as HTMLInputElement;
+    filterWaypoints(waypointSearch.value);
+
     const endTime = Date.now();
-    console.log(`Processed GPX file with ${wpts.length} waypoint(s) in ${endTime - startTime} ms`);
+    console.log(`Processed in ${endTime - startTime} ms`);
 }
 
 function main() {
@@ -236,7 +275,6 @@ function main() {
     const gpxFile = document.getElementById('gpxFile') as HTMLInputElement;
     gpxFile.addEventListener('change', onGpxFileChange);
 
-    // Attach search event
     const waypointSearch = document.getElementById('waypointSearch') as HTMLInputElement;
     waypointSearch.addEventListener('input', (e) => {
         const value = (e.target as HTMLInputElement).value;
