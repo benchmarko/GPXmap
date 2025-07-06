@@ -22,9 +22,8 @@ type MarkerType = L.Marker & {
 const waypointDataMap: WaypointDataMapType = {}; // Store markers data for filtering
 
 const map = L.map('map');
+const waypointGroup = L.markerClusterGroup();
 const popup = L.popup({ offset: L.point(0, -30) });
-
-let waypointGroup: MarkerClusterGroup | null = null;
 
 // Marker pool for reuse
 const markerPool: MarkerType[] = [];
@@ -92,48 +91,20 @@ function getIcon(cacheType: string) {
 
 // Helper to render (filtered) markers
 function renderMarkers(markersData: WaypointDataType[]) {
-    if (waypointGroup) {
+    if (map.hasLayer(waypointGroup)) {
         clearMarkersFromGroup(waypointGroup);
         map.removeLayer(waypointGroup);
     }
-    waypointGroup = L.markerClusterGroup();
-
-    markersData.forEach(data => {
-        const marker = getPooledMarker(data.lat, data.lon, getIcon(data.type), data.name);
-        waypointGroup!.addLayer(marker);
-    });
-    waypointGroup.addTo(map);
-
-    waypointGroup.on('click', (e: L.LeafletMouseEvent) => {
-        const marker = e.propagatedFrom as MarkerType;
-        const data = waypointDataMap[marker.waypointName];
-        const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement;
-        waypointInfo.innerHTML = `Name: ${data.name}<br>
-Lat: ${data.lat}, Lng: ${data.lon}<br>
-Description: ${data.desc}<br>
-Cache Info:<br>
-${data.cacheInfo || 'No cache info'}`;
-
-        const html = `
-<strong>${data.name}</strong><br>
-<small>Lat: ${data.lat.toFixed(6)}, Lng: ${data.lon.toFixed(6)}</small>
-<details style="margin-top:4px;">
-    <summary>More info</summary>
-    <div style="margin-top:4px;">
-        <em>${data.desc}</em>
-        <div style="margin:0;max-height:120px;overflow:auto;border:1px solid #ccc;padding:4px;background:#fafafa;">
-            ${data.cacheInfo}
-        </div>
-    </div>
-</details>
-        `;
-        popup
-            .setLatLng(marker.getLatLng())
-            .setContent(html)
-            .openOn(map);
-    });
+    //waypointGroup = L.markerClusterGroup();
 
     if (markersData.length > 0) {
+        markersData.forEach(data => {
+            const marker = getPooledMarker(data.lat, data.lon, getIcon(data.type), data.name);
+            waypointGroup!.addLayer(marker);
+        });
+        waypointGroup.addTo(map);
+        //waypointGroup.on('click', onWaypointGroupClick);
+
         map.fitBounds(waypointGroup.getBounds().pad(0.5));
     }
 }
@@ -155,6 +126,37 @@ function filterWaypoints(query: string) {
     });
     renderMarkers(filtered);
 }
+
+function onWaypointGroupClick(e: L.LeafletMouseEvent) {
+    const marker = e.propagatedFrom as MarkerType;
+    const data = waypointDataMap[marker.waypointName];
+    const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement;
+    waypointInfo.innerHTML = `Name: ${data.name}<br>
+Lat: ${data.lat}, Lng: ${data.lon}<br>
+Description: ${data.desc}<br>
+Cache Info:<br>
+${data.cacheInfo || 'No cache info'}`;
+
+    const html = `
+<strong>${data.name}</strong><br>
+<small>Lat: ${data.lat.toFixed(6)}, Lng: ${data.lon.toFixed(6)}</small>
+<details style="margin-top:4px;">
+    <summary>More info</summary>
+    <div style="margin-top:4px;">
+        <em>${data.desc}</em>
+        <div style="margin:0;max-height:120px;overflow:auto;border:1px solid #ccc;padding:4px;background:#fafafa;">
+            ${data.cacheInfo}
+        </div>
+    </div>
+</details>
+        `;
+
+    popup
+        .setLatLng(marker.getLatLng())
+        .setContent(html)
+        .openOn(map);
+}
+
 
 // Handle file upload
 async function onGpxFileChange(event: Event) {
@@ -215,8 +217,8 @@ async function onGpxFileChange(event: Event) {
         const waypointSearch = document.getElementById('waypointSearch') as HTMLInputElement;
         filterWaypoints(waypointSearch.value);
     } else {
-        alert('No waypoints found in this GPX file.');
-        waypointGroup = null;
+        waypointInfo.innerHTML = 'No waypoints found in this GPX file.';
+        inputElement.style = 'color:red';
     }
     const endTime = Date.now();
     console.log(`Processed GPX file with ${wpts.length} waypoint(s) in ${endTime - startTime} ms`);
@@ -228,6 +230,9 @@ function main() {
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap'
     }).addTo(map);
+
+    //waypointGroup.addTo(map);
+    waypointGroup.on('click', onWaypointGroupClick);
 
     document.getElementById('gpxFile')?.addEventListener('change', onGpxFileChange);
 
