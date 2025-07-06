@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <!-- <link rel="icon" type="image/svg+xml" href="/vite.svg" /> -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- <link rel="stylesheet" href="style.css"> -->
+  <title>GPX Map</title>
+  <script type="module" crossorigin src="/assets/index-tYg7dxXL.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-DtNhssSw.css">
+</head>
+
+<body>
+  <div id="app">
+    <div id="top">
+      <div>GC Waypoint Viewer</div>
+      <input type="file" id="gpxFile" accept=".gpx,application/gpx+xml" />
+      <span>
+        <input type="text" id="waypointSearch" placeholder="Search waypoints" />
+        <button id="waypointSearchClear" title="Clear search">x</button>
+        <span id="waypointCount" title="Waypoint Count">0</span>
+      </span>
+    </div>
+    <div id="map"></div>
+    <div id="waypointInfo" placeholder="Waypoint info will appear here...">
+    </div>
+  </div>
+</body>
+
+</html>
