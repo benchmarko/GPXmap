@@ -24,7 +24,7 @@ const waypointDataMap: WaypointDataMapType = {}; // Store markers data for filte
 
 const map = L.map('map');
 const waypointGroup = L.markerClusterGroup();
-const popup = L.popup({ offset: L.point(0, -30) });
+const popup = L.popup({ offset: L.point(0, -20) });
 
 // Marker pool for reuse
 const markerPool: MarkerType[] = [];
@@ -128,33 +128,61 @@ function filterWaypoints(query: string) {
     waypointCount.innerText = `${filtered.length} / ${waypointData.length}`;
 }
 
+function insertNewlineAtLastMatch(str: string, find: string, keepMatch: boolean) {
+    const lastMatch = str.lastIndexOf(find);
+    if (lastMatch < 0) {
+        return str;
+    }
+    const matchLen = find.length;
+    const add = keepMatch ? 1 : matchLen;
+    const result = [str.substring(0, lastMatch).trim(), str.substring(lastMatch + add).trim()].join('<br>\n');
+    return result;
+}
+
+function position2dmm(lat: number, lon: number) {
+    const latAbs = Math.abs(lat);
+    const lonAbs = Math.abs(lon);
+    const latNS = lat >= 0 ? "N" : "S";
+    const lonEW = lon >= 0 ? "E" : "W";
+    const latDeg = Math.floor(latAbs);
+    const latMin = (latAbs - latDeg) * 60;
+    const lonDeg = Math.floor(lonAbs);
+    const lonMin = (lonAbs - lonDeg) * 60;
+    return latNS + " " + String(latDeg).padStart(2, '0') + "° " + latMin.toFixed(3).padStart(6, '0') + " " + lonEW + " " + String(lonDeg).padStart(3, '0') + "° " + lonMin.toFixed(3).padStart(6, '0');
+}
+
 function onWaypointGroupClick(e: L.LeafletMouseEvent) {
     const marker = e.propagatedFrom as MarkerType;
     const data = waypointDataMap[marker.waypointName];
     const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement;
-    waypointInfo.innerHTML = `Name: ${data.name}<br>
-Lat: ${data.lat}, Lng: ${data.lon}<br>
-Description: ${data.desc}<br>
-Cache Info:<br>
-${data.cacheInfo || 'No cache info'}`;
 
-    const html = `
-<strong>${data.name}</strong><br>
-<small>Lat: ${data.lat.toFixed(6)}, Lng: ${data.lon.toFixed(6)}</small>
+    const desc = insertNewlineAtLastMatch(insertNewlineAtLastMatch(data.desc, ' by ', true), ',', false);
+
+    const dmm = position2dmm(data.lat, data.lon);
+
+    const cacheInfoWithBr = data.cacheInfo ? `<br>\n${data.cacheInfo}<br>\n` : '';
+    waypointInfo.innerHTML = `Name: ${data.name}<br>\n${dmm}<br>\n${data.desc}<br>\n${cacheInfoWithBr}`;
+
+const moreInfo = data.cacheInfo ? `
 <details style="margin-top:4px;">
     <summary>More info</summary>
     <div style="margin-top:4px;">
-        <em>${data.desc}</em>
         <div style="margin:0;max-height:120px;overflow:auto;border:1px solid #ccc;padding:4px;background:#fafafa;">
             ${data.cacheInfo}
         </div>
     </div>
-</details>
-        `;
+</details>` : '';
+
+    const popupContent = `
+<strong>${data.name}</strong><br>
+<span>${desc}</span><br>
+<small>${dmm}</small><br>
+${moreInfo}
+`;
 
     popup
         .setLatLng(marker.getLatLng())
-        .setContent(html)
+        .setContent(popupContent)
         .openOn(map);
 }
 
@@ -202,31 +230,20 @@ function parseGpxFile(text: string, name: string) {
         const name = wpt.getElementsByTagName('name')[0]?.textContent || 'Waypoint';
         const desc = wpt.getElementsByTagName('desc')[0]?.textContent || '';
         const type = wpt.getElementsByTagName('type')[0]?.textContent || '';
-        // Parse groundspeak:cache info
+
         const cacheElem = wpt.getElementsByTagName('groundspeak:cache')[0];
         let cacheInfo = '';
-        let cacheType = '';
-        if (cacheElem) {
+         if (cacheElem) {
+            const archived = (cacheElem.getAttribute('archived') || '').toLowerCase() === 'true';
+            const available = (cacheElem.getAttribute('available') || '').toLowerCase() === 'true';
             const cacheName = cacheElem.getElementsByTagName('groundspeak:name')[0]?.textContent || '';
-            cacheType = cacheElem.getElementsByTagName('groundspeak:type')[0]?.textContent || '';
+            const cacheType = cacheElem.getElementsByTagName('groundspeak:type')[0]?.textContent || '';
             const container = cacheElem.getElementsByTagName('groundspeak:container')[0]?.textContent || '';
             const longDesc = cacheElem.getElementsByTagName('groundspeak:long_description')[0]?.textContent || '';
-            cacheInfo = `Cache Name: ${cacheName}<br>\nType: ${cacheType}<br>\nContainer: ${container}<br>\nDescription: ${longDesc}`;
+            const hints = cacheElem.getElementsByTagName('groundspeak:encoded_hints')[0]?.textContent || '';
+            // TODO: logs?
+            cacheInfo = `- Cache Name: ${cacheName}<br>\n- Type: ${cacheType}<br>\n- Container: ${container}<br>\n- Archived: ${archived}<br>\n- Available: ${available}<br>\n- Hints: ${hints}<br>\n- Description:<br>\n${longDesc}`;
         }
-
-        /*
-        // Test: check for UTF-8 chars >= 0x100
-        let utf8Chars = '';
-        for (let i = 0; i < desc.length; i++) {
-            if (desc.charCodeAt(i) >= 0x100) {
-                utf8Chars += desc.charAt(i);
-            }
-        }
-        if (utf8Chars) {
-            console.log("DDD:", name, `>${utf8Chars}<`);
-        }
-        */
-
         waypointDataMap[name] = { name, lat, lon, type, desc, cacheInfo };
     }
     return `Processed file ${name} with ${wpts.length} waypoints.`;
