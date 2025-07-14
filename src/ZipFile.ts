@@ -43,6 +43,15 @@ interface EndOfCentralDir {
     readonly cdSize: number // size of central directory (just for information)
 }
 
+const ZipConstants = {
+    eocdSignature: 0x06054B50, // EOCD signature: "PK\x05\x06"
+    cdfhSignature: 0x02014B50, // Central directory file header signature: PK\x01\x02"
+    lfhSignature: 0x04034B50, // Local file header signature: "PK\x03\x04"
+    eocdLen: 22, // End of central directory (EOCD)
+    cdfhLen: 46, // Central directory file header length
+    lfhLen: 30 // Local file header length
+};
+
 const textDecoder = typeof TextDecoder !== "undefined" ? new TextDecoder("utf-8", {fatal : true}) : null;
 
 export class ZipFile {
@@ -79,18 +88,15 @@ export class ZipFile {
         return error;
     }
 
-    private subArr(begin: number, length: number) {
-        const data = this.data,
-            end = begin + length;
-
-        return data.slice ? data.slice(begin, end) : data.subarray(begin, end); // array.slice on Uint8Array not for IE11
+    private subArr(begin: number, length: number): Uint8Array {
+        return this.data.slice(begin, begin + length);
     }
 
-    private readUTFFromCharCode(offset: number, len: number) {
+    private readAsFromCharCode(offset: number, len: number): string {
         const callSize = 25000; // use call window to avoid "maximum call stack error" for e.g. size 336461
         let out = "";
 
-        while (len) {
+        while (len > 0) {
             const chunkLen = Math.min(len, callSize),
                 nums = this.subArr(offset, chunkLen) as unknown as number[];
 
@@ -101,27 +107,27 @@ export class ZipFile {
         return out;
     }
 
-    private readUTF(offset: number, len: number) {
+    private readAsUTF8(offset: number, len: number): string {
         if (textDecoder) {
             return textDecoder.decode(this.subArr(offset, len));
         }
         // fallback for environments without TextDecoder
-        return this.readUTFFromCharCode(offset, len);
+        return this.readAsFromCharCode(offset, len);
     }
 
-    private readUInt(i: number) {
+    private readUInt(i: number): number {
         const data = this.data;
 
         return (data[i + 3] << 24) | (data[i + 2] << 16) | (data[i + 1] << 8) | data[i]; // eslint-disable-line no-bitwise
     }
 
-    private readUShort(i: number) {
+    private readUShort(i: number): number {
         const data = this.data;
 
         return ((data[i + 1]) << 8) | data[i]; // eslint-disable-line no-bitwise
     }
 
-    private readEocd(eocdPos: number) { // read End of central directory
+    private readEocd(eocdPos: number): EndOfCentralDir { // read End of central directory
         const eocd: EndOfCentralDir = {
             signature: this.readUInt(eocdPos),
             entries: this.readUShort(eocdPos + 10), // total number of central directory records
@@ -132,7 +138,7 @@ export class ZipFile {
         return eocd;
     }
 
-    private readCdfh(pos: number) { // read Central directory file header
+    private readCdfh(pos: number): CentralDirFileHeader { // read Central directory file header
         const cdfh: CentralDirFileHeader = {
             signature: this.readUInt(pos),
             version: this.readUShort(pos + 6), // version needed to extract (minimum)
@@ -159,28 +165,22 @@ export class ZipFile {
         return cdfh;
     }
 
-    private readZipDirectory() {
-        const eocdLen = 22, // End of central directory (EOCD)
-            maxEocdCommentLen = 0xffff,
-            eocdSignature = 0x06054B50, // EOCD signature: "PK\x05\x06"
-            cdfhSignature = 0x02014B50, // Central directory file header signature: PK\x01\x02"
-            cdfhLen = 46, // Central directory file header length
-            lfhSignature = 0x04034b50, // Local file header signature
-            lfhLen = 30, // Local file header length
+    private readZipDirectory(): ZipDirectoryType {
+        const maxEocdCommentLen = 0xffff,
             data = this.data,
             entryTable: ZipDirectoryType = {};
 
         // find End of central directory (EOCD) record
-        let i = data.length - eocdLen + 1, // +1 because of loop
+        let i = data.length - ZipConstants.eocdLen + 1, // +1 because of loop
             eocd: EndOfCentralDir | undefined;
 
         const n = Math.max(0, i - maxEocdCommentLen);
 
         while (i >= n) {
             i -= 1;
-            if (this.readUInt(i) === eocdSignature) {
+            if (this.readUInt(i) === ZipConstants.eocdSignature) {
                 eocd = this.readEocd(i);
-                if (this.readUInt(eocd.cdfhOffset) === cdfhSignature) {
+                if (this.readUInt(eocd.cdfhOffset) === ZipConstants.cdfhSignature) {
                     break; // looks good, so we assume that we have found the EOCD
                 }
             }
@@ -195,22 +195,22 @@ export class ZipFile {
         for (i = 0; i < entries; i += 1) {
             const cdfh = this.readCdfh(offset);
 
-            if (cdfh.signature !== cdfhSignature) {
+            if (cdfh.signature !== ZipConstants.cdfhSignature) {
                 throw this.composeError(Error(), "Zip: Bad CDFH signature", "", offset);
             }
             if (!cdfh.fileNameLength) {
                 throw this.composeError(Error(), "Zip Entry name missing", "", offset);
             }
-            offset += cdfhLen;
+            offset += ZipConstants.cdfhLen;
 
-            cdfh.name = this.readUTF(offset, cdfh.fileNameLength);
+            cdfh.name = this.readAsUTF8(offset, cdfh.fileNameLength);
             offset += cdfh.fileNameLength;
             cdfh.isDirectory = cdfh.name.charAt(cdfh.name.length - 1) === "/";
 
             cdfh.extra = this.subArr(offset, cdfh.extraFieldLength);
             offset += cdfh.extraFieldLength;
 
-            cdfh.comment = this.readUTF(offset, cdfh.fileCommentLength);
+            cdfh.comment = this.readAsUTF8(offset, cdfh.fileCommentLength);
             offset += cdfh.fileCommentLength;
 
             if ((cdfh.flag & 1) === 1) { // eslint-disable-line no-bitwise
@@ -223,20 +223,20 @@ export class ZipFile {
             cdfh.timestamp = new Date(((dostime >> 25) & 0x7F) + 1980, ((dostime >> 21) & 0x0F) - 1, (dostime >> 16) & 0x1F, (dostime >> 11) & 0x1F, (dostime >> 5) & 0x3F, (dostime & 0x1F) << 1).getTime(); // eslint-disable-line no-bitwise
 
             // local file header... much more info
-            if (this.readUInt(cdfh.localOffset) !== lfhSignature) {
+            if (this.readUInt(cdfh.localOffset) !== ZipConstants.lfhSignature) {
                 console.error("Zip: readZipDirectory: LFH signature not found at offset", cdfh.localOffset);
             }
 
             const lfhExtrafieldLength = this.readUShort(cdfh.localOffset + 28); // extra field length
 
-            cdfh.dataStart = cdfh.localOffset + lfhLen + cdfh.name.length + lfhExtrafieldLength;
+            cdfh.dataStart = cdfh.localOffset + ZipConstants.lfhLen + cdfh.name.length + lfhExtrafieldLength;
 
             entryTable[cdfh.name] = cdfh;
         }
         return entryTable;
     }
 
-    private static fnInflateConstruct(codes: CodeType, lens2: number[], n: number) {
+    private static fnInflateConstruct(codes: CodeType, lens2: number[], n: number): number {
         let i: number;
 
         for (i = 0; i <= 0xF; i += 1) {
@@ -277,7 +277,7 @@ export class ZipFile {
         return left;
     }
 
-    private static fnConstructFixedHuffman(lens: number[], lenCode: CodeType, distCode: CodeType) { //TTT untested?
+    private static fnConstructFixedHuffman(lens: number[], lenCode: CodeType, distCode: CodeType): void { //TTT untested?
         let symbol: number;
 
         for (symbol = 0; symbol < 0x90; symbol += 1) {
@@ -299,7 +299,7 @@ export class ZipFile {
         ZipFile.fnInflateConstruct(distCode, lens, 0x1E);
     }
 
-    private inflate(offset: number, compressedSize: number, finalSize: number) {
+    private inflate(offset: number, compressedSize: number, finalSize: number): Uint8Array {
         /* eslint-disable array-element-newline */
         const startLens = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258],
             lExt = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0],
@@ -525,13 +525,13 @@ export class ZipFile {
         let dataUTF8 = "";
 
         if (cdfh.compressionMethod === 0) { // stored
-            dataUTF8 = this.readUTF(cdfh.dataStart, cdfh.size);
+            dataUTF8 = this.readAsFromCharCode(cdfh.dataStart, cdfh.size);
         } else if (cdfh.compressionMethod === 8) { // deflated
             const fileData = this.inflate(cdfh.dataStart, cdfh.compressedSize, cdfh.size),
                 savedData = this.data;
 
             this.data = fileData; // we need to switch this.data
-            dataUTF8 = this.readUTF(0, fileData.length);
+            dataUTF8 = this.readAsFromCharCode(0, fileData.length);
             this.data = savedData; // restore
         } else {
             throw this.composeError(Error(), "Zip: readData: compression method not supported:" + cdfh.compressionMethod, "", 0);
@@ -544,5 +544,19 @@ export class ZipFile {
         }
         */
         return dataUTF8;
+    }
+
+    public static isProbablyZipFile(data: Uint8Array): boolean {
+        if (data.length < 4) {
+            return false; // too short to be a valid ZIP file
+        }
+        // Check for the Local File Header (LFH) signature at the beginning of the file
+        const lfhSignature = ZipConstants.lfhSignature;
+        const i = 0; // we only check the first 4 bytes
+        const firstFourBytes = (data[i + 3] << 24) | (data[i + 2] << 16) | (data[i + 1] << 8) | data[i]; // eslint-disable-line no-bitwise
+        if (firstFourBytes !== lfhSignature) {
+            return false; // does not start with the Local File Header signature
+        }
+        return true; // it looks like a ZIP file
     }
 }

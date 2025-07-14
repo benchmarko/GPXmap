@@ -33,6 +33,14 @@ function deleteAllItems(items: Record<string, unknown>) {
     Object.keys(items).forEach(key => delete items[key]);
 }
 
+function debounce(fn: (...args: any[]) => void, delay: number) {
+    let timeoutId: number | undefined;
+    return (...args: any[]) => {
+        clearTimeout(timeoutId);
+        timeoutId = window.setTimeout(() => fn(...args), delay);
+    };
+}
+
 // Get a marker from the pool or create a new one
 function getPooledMarker(lat: number, lon: number, icon: L.DivIcon, name: string): MarkerType {
     let marker: MarkerType;
@@ -48,7 +56,7 @@ function getPooledMarker(lat: number, lon: number, icon: L.DivIcon, name: string
 }
 
 // When clearing markers, return them to the pool
-function clearMarkersFromGroup(group: MarkerClusterGroup) {
+function clearMarkersFromGroup(group: MarkerClusterGroup): void {
     group.eachLayer(layer => {
         if (layer instanceof L.Marker) {
             markerPool.push(layer as MarkerType);
@@ -76,7 +84,7 @@ const iconColors: Record<string, string> = {
 
 const iconCache: Record<string, L.DivIcon> = {};
 
-function getIcon(cacheType: string) {
+function getIcon(cacheType: string): L.DivIcon {
     const color = iconColors[cacheType] || iconColors.Default;
     if (!iconCache[color]) {
         iconCache[color] = L.divIcon({
@@ -91,7 +99,7 @@ function getIcon(cacheType: string) {
 }
 
 // Helper to render (filtered) markers
-function renderMarkers(markersData: WaypointDataType[]) {
+function renderMarkers(markersData: WaypointDataType[]): void {
     if (map.hasLayer(waypointGroup)) {
         clearMarkersFromGroup(waypointGroup);
         map.removeLayer(waypointGroup);
@@ -108,7 +116,7 @@ function renderMarkers(markersData: WaypointDataType[]) {
 }
 
 // Filter logic
-function filterWaypoints(query: string) {
+function filterWaypoints(query: string): void {
     const q = query.trim().toLowerCase();
     const waypointData = Object.values(waypointDataMap);
     const waypointCount = document.getElementById('waypointCount') as HTMLSpanElement;
@@ -128,7 +136,7 @@ function filterWaypoints(query: string) {
     waypointCount.innerText = `${filtered.length} / ${waypointData.length}`;
 }
 
-function insertNewlineAtLastMatch(str: string, find: string, keepMatch: boolean) {
+function insertNewlineAtLastMatch(str: string, find: string, keepMatch: boolean): string {
     const lastMatch = str.lastIndexOf(find);
     if (lastMatch < 0) {
         return str;
@@ -139,7 +147,7 @@ function insertNewlineAtLastMatch(str: string, find: string, keepMatch: boolean)
     return result;
 }
 
-function position2dmm(lat: number, lon: number) {
+function position2dmm(lat: number, lon: number): string {
     const latAbs = Math.abs(lat);
     const lonAbs = Math.abs(lon);
     const latNS = lat >= 0 ? "N" : "S";
@@ -151,7 +159,7 @@ function position2dmm(lat: number, lon: number) {
     return latNS + " " + String(latDeg).padStart(2, '0') + "° " + latMin.toFixed(3).padStart(6, '0') + " " + lonEW + " " + String(lonDeg).padStart(3, '0') + "° " + lonMin.toFixed(3).padStart(6, '0');
 }
 
-function onWaypointGroupClick(e: L.LeafletMouseEvent) {
+function onWaypointGroupClick(e: L.LeafletMouseEvent): void {
     const marker = e.propagatedFrom as MarkerType;
     const data = waypointDataMap[marker.waypointName];
     const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement;
@@ -186,7 +194,7 @@ ${moreInfo}
         .openOn(map);
 }
 
-function processZipFile(uint8Array: Uint8Array, name: string) {
+function processZipFile(uint8Array: Uint8Array, name: string): string[] {
     const messages: string[] = []
     const zip = new ZipFile({
         data: uint8Array, // rather data
@@ -202,19 +210,28 @@ function processZipFile(uint8Array: Uint8Array, name: string) {
         if (name2.startsWith("__MACOSX/")) { // MacOS X creates some extra folder in ZIP files
             console.log("processZipFile: Ignoring file:", name2);
         } else {
-            let data2: string | undefined;
-
-            data2 = zip.readData(name2);
+            const data2 = zip.readData(name2);
             if (data2) {
-                messages.push(parseGpxFile(data2, name2));
+                if (ZipFile.isProbablyZipFile(new Uint8Array([data2.charCodeAt(0), data2.charCodeAt(1), data2.charCodeAt(2), data2.charCodeAt(3)]))) {
+                    console.log(`File ${name2} is a ZIP file, processing recursively.`);
+                    const data2AsUint8Array = new Uint8Array([...data2].map(c => c.charCodeAt(0)));
+                    const messages2 = processZipFile(data2AsUint8Array, name2);
+                    messages.push(...messages2);
+                } else {
+                    messages.push(parseGpxFile(data2, name2));
+                }
             }
         }
     }
     return messages;
 }
 
-function parseGpxFile(text: string, name: string) {
+function parseGpxFile(text: string, name: string): string {
     const parser = new DOMParser();
+    if (text.includes("\v")) { // some special character?
+        text = text.replaceAll("\v", " ");
+        console.warn(`File ${name}: Special VT character(s) removed.`);
+    }
     const xml = parser.parseFromString(text, 'application/xml');
 
     const errorNode = xml.querySelector("parsererror");
@@ -250,7 +267,7 @@ function parseGpxFile(text: string, name: string) {
 }
 
 // Handle file upload
-async function onGpxFileChange(event: Event) {
+async function onGpxFileChange(event: Event): Promise<void> {
     if (popup.isOpen()) {
         popup.close();
     }
@@ -263,10 +280,9 @@ async function onGpxFileChange(event: Event) {
     deleteAllItems(waypointDataMap); // Reset waypoint data map
     filterWaypoints("");
 
-    const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement;
-    waypointInfo.innerHTML = '';
-    inputElement.style = '';
+    inputElement.style.color = '';
 
+    let infoHtml = '';
     for (const file of inputElement.files) {
         try {
             let text = '';
@@ -274,17 +290,20 @@ async function onGpxFileChange(event: Event) {
                 // on Mac OS it is "application/zip"
                 const arrayBuffer = await file.arrayBuffer();
                 const messages = processZipFile(new Uint8Array(arrayBuffer), file.name);
-                waypointInfo.innerHTML += messages.map((message) => `<span>${message}</span><br>\n`).join('');
+                infoHtml += messages.map((message) => `<span>${message}</span><br>\n`).join('');
             } else {
                 text = await file.text();
                 const message = parseGpxFile(text, file.name);
-                waypointInfo.innerHTML += `<span>${message}</span><br>\n`;
+                infoHtml += `<span>${message}</span><br>\n`;
             }
         } catch (e) {
-            waypointInfo.innerHTML += `<span style="color: red">${e}</span><br>\n`;
-            inputElement.style = 'color:red';
+            const errorMsg = e instanceof Error ? e.message : String(e);
+            infoHtml += `<span style="color: red">${errorMsg}</span><br>\n`;
+            inputElement.style.color = 'red';
         }
     }
+    const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement;
+    waypointInfo.innerHTML = infoHtml;
 
     const waypointSearch = document.getElementById('waypointSearch') as HTMLInputElement;
     filterWaypoints(waypointSearch.value);
@@ -293,7 +312,7 @@ async function onGpxFileChange(event: Event) {
     console.log(`Processed in ${endTime - startTime} ms`);
 }
 
-function main() {
+function main(): void {
     // Initialize Leaflet map
     map.setView([0, 0], 2);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -306,10 +325,10 @@ function main() {
     gpxFile.addEventListener('change', onGpxFileChange);
 
     const waypointSearch = document.getElementById('waypointSearch') as HTMLInputElement;
-    waypointSearch.addEventListener('input', (e) => {
+    waypointSearch.addEventListener('input', debounce((e) => {
         const value = (e.target as HTMLInputElement).value;
         filterWaypoints(value);
-    });
+    }, 400));
 
     const waypointSearchClear = document.getElementById('waypointSearchClear') as HTMLButtonElement;
     waypointSearchClear.addEventListener('click', (_e) => {
