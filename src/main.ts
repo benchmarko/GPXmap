@@ -194,11 +194,11 @@ ${moreInfo}
         .openOn(map);
 }
 
-function processZipFile(uint8Array: Uint8Array, name: string): string[] {
+function processZipFile(uint8Array: Uint8Array, zipName: string): string[] {
     const messages: string[] = []
     const zip = new ZipFile({
         data: uint8Array, // rather data
-        zipName: name
+        zipName: zipName
     });
 
     const zipDirectory = zip.getZipDirectory(),
@@ -210,15 +210,15 @@ function processZipFile(uint8Array: Uint8Array, name: string): string[] {
         if (name2.startsWith("__MACOSX/")) { // MacOS X creates some extra folder in ZIP files
             console.log("processZipFile: Ignoring file:", name2);
         } else {
-            const data2 = zip.readData(name2);
-            if (data2) {
-                if (ZipFile.isProbablyZipFile(new Uint8Array([data2.charCodeAt(0), data2.charCodeAt(1), data2.charCodeAt(2), data2.charCodeAt(3)]))) {
+            const binaryData = zip.readBinaryData(name2);
+            if (binaryData) {
+                if (name2.endsWith('.zip') || ZipFile.isProbablyZipFile(binaryData)) {
                     console.log(`File ${name2} is a ZIP file, processing recursively.`);
-                    const data2AsUint8Array = new Uint8Array([...data2].map(c => c.charCodeAt(0)));
-                    const messages2 = processZipFile(data2AsUint8Array, name2);
+                    const messages2 = processZipFile(binaryData, name2);
                     messages.push(...messages2);
                 } else {
-                    messages.push(parseGpxFile(data2, name2));
+                    const utf8Text = ZipFile.convertUint8ArrayToUtf8(binaryData);
+                    messages.push(parseGpxFile(utf8Text, name2));
                 }
             }
         }
@@ -285,14 +285,13 @@ async function onGpxFileChange(event: Event): Promise<void> {
     let infoHtml = '';
     for (const file of inputElement.files) {
         try {
-            let text = '';
             if (file.type === 'application/x-zip-compressed' || file.type === 'application/zip') {
                 // on Mac OS it is "application/zip"
                 const arrayBuffer = await file.arrayBuffer();
                 const messages = processZipFile(new Uint8Array(arrayBuffer), file.name);
                 infoHtml += messages.map((message) => `<span>${message}</span><br>\n`).join('');
             } else {
-                text = await file.text();
+                const text = await file.text();
                 const message = parseGpxFile(text, file.name);
                 infoHtml += `<span>${message}</span><br>\n`;
             }

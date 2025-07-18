@@ -52,13 +52,29 @@ const ZipConstants = {
     lfhLen: 30 // Local file header length
 };
 
-const textDecoder = typeof TextDecoder !== "undefined" ? new TextDecoder("utf-8", {fatal : true}) : null;
+function textDecoderDecodePolyfill(data: Uint8Array): string {
+    const callSize = 25000; // use call window to avoid "maximum call stack error" for e.g. size 336461
+    let out = "";
+    let len = data.length;
+    let offset = 0;
+
+    while (len > 0) {
+        const chunkLen = Math.min(len, callSize);
+        const nums = data.subarray(offset, offset + chunkLen);
+
+        out += String.fromCharCode.apply(null, nums as unknown as number[]); // on Chrome this is faster than single character processing
+        offset += chunkLen;
+        len -= chunkLen;
+    }
+    return out;
+}
 
 export class ZipFile {
     private readonly options: ZipFileOptions;
 
     private data!: Uint8Array;
     private entryTable: ZipDirectoryType = {};
+    private static textDecoder = typeof TextDecoder !== "undefined" ? new TextDecoder("utf-8", { fatal: false }) : { decode: textDecoderDecodePolyfill };
 
     constructor(options: ZipFileOptions) {
         this.options = {} as ZipFileOptions;
@@ -88,31 +104,13 @@ export class ZipFile {
         return error;
     }
 
-    private subArr(begin: number, length: number): Uint8Array {
-        return this.data.slice(begin, begin + length);
-    }
-
-    private readAsFromCharCode(offset: number, len: number): string {
-        const callSize = 25000; // use call window to avoid "maximum call stack error" for e.g. size 336461
-        let out = "";
-
-        while (len > 0) {
-            const chunkLen = Math.min(len, callSize),
-                nums = this.subArr(offset, chunkLen) as unknown as number[];
-
-            out += String.fromCharCode.apply(null, nums); // on Chrome this is faster than single character processing
-            offset += chunkLen;
-            len -= chunkLen;
-        }
-        return out;
+    public static convertUint8ArrayToUtf8(data: Uint8Array): string {
+        return ZipFile.textDecoder.decode(data);
     }
 
     private readAsUTF8(offset: number, len: number): string {
-        if (textDecoder) {
-            return textDecoder.decode(this.subArr(offset, len));
-        }
-        // fallback for environments without TextDecoder
-        return this.readAsFromCharCode(offset, len);
+        const data = this.data.subarray(offset, offset + len);
+        return ZipFile.convertUint8ArrayToUtf8(data);
     }
 
     private readUInt(i: number): number {
@@ -207,7 +205,7 @@ export class ZipFile {
             offset += cdfh.fileNameLength;
             cdfh.isDirectory = cdfh.name.charAt(cdfh.name.length - 1) === "/";
 
-            cdfh.extra = this.subArr(offset, cdfh.extraFieldLength);
+            cdfh.extra = this.data.subarray(offset, offset + cdfh.extraFieldLength);
             offset += cdfh.extraFieldLength;
 
             cdfh.comment = this.readAsUTF8(offset, cdfh.fileCommentLength);
@@ -515,35 +513,20 @@ export class ZipFile {
         return outBuf;
     }
 
-    readData(name: string): string {
+    public readBinaryData(name: string): Uint8Array {
         const cdfh = this.entryTable[name];
 
         if (!cdfh) {
-            throw this.composeError(Error(), "Zip: readData: file does not exist:" + name, "", 0);
+            throw this.composeError(Error(), "Zip: readBinaryData: file does not exist:" + name, "", 0);
         }
-
-        let dataUTF8 = "";
 
         if (cdfh.compressionMethod === 0) { // stored
-            dataUTF8 = this.readAsFromCharCode(cdfh.dataStart, cdfh.size);
+            return this.data.subarray(cdfh.dataStart, cdfh.dataStart + cdfh.size);
         } else if (cdfh.compressionMethod === 8) { // deflated
-            const fileData = this.inflate(cdfh.dataStart, cdfh.compressedSize, cdfh.size),
-                savedData = this.data;
-
-            this.data = fileData; // we need to switch this.data
-            dataUTF8 = this.readAsFromCharCode(0, fileData.length);
-            this.data = savedData; // restore
+            return this.inflate(cdfh.dataStart, cdfh.compressedSize, cdfh.size);
         } else {
-            throw this.composeError(Error(), "Zip: readData: compression method not supported:" + cdfh.compressionMethod, "", 0);
+            throw this.composeError(Error(), "Zip: readBinaryData: compression method not supported:" + cdfh.compressionMethod, "", 0);
         }
-        /*
-        if (dataUTF8.length !== cdfh.size) { // assert
-            console.warn("Zip: readData: different length in cdfh:", dataUTF8.length, cdfh.size);
-            //https://www.geeksforgeeks.org/javascript/how-to-get-the-length-of-a-string-in-bytes-in-javascript/
-            //new TextEncoder().encode(dataUTF8).length or new Blob([dataUTF8]).size
-        }
-        */
-        return dataUTF8;
     }
 
     public static isProbablyZipFile(data: Uint8Array): boolean {
