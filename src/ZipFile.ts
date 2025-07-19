@@ -99,11 +99,6 @@ export class ZipFile {
         return this.entryTable;
     }
 
-    private composeError(error: Error, message: string, value: string, pos: number) {
-        error.message = this.options.zipName + ": " + message + "," + value + "," + pos; // put zipname in message
-        return error;
-    }
-
     public static convertUint8ArrayToUtf8(data: Uint8Array): string {
         return ZipFile.textDecoder.decode(data);
     }
@@ -184,7 +179,7 @@ export class ZipFile {
             }
         }
         if (!eocd) {
-            throw this.composeError(Error(), "Zip: File ended abruptly: EOCD not found", "", (i >= 0) ? i : 0);
+            throw new Error(`Zip: File ended abruptly: EOCD not found at pos ${i >= 0 ? i : 0}`);
         }
 
         const entries = eocd.entries;
@@ -194,10 +189,10 @@ export class ZipFile {
             const cdfh = this.readCdfh(offset);
 
             if (cdfh.signature !== ZipConstants.cdfhSignature) {
-                throw this.composeError(Error(), "Zip: Bad CDFH signature", "", offset);
+                throw new Error(`Zip: Bad CDFH signatureat pos ${offset}`);
             }
             if (!cdfh.fileNameLength) {
-                throw this.composeError(Error(), "Zip Entry name missing", "", offset);
+                throw new Error(`Zip Entry name missing at pos ${offset}`);
             }
             offset += ZipConstants.cdfhLen;
 
@@ -212,7 +207,7 @@ export class ZipFile {
             offset += cdfh.fileCommentLength;
 
             if ((cdfh.flag & 1) === 1) { // eslint-disable-line no-bitwise
-                throw this.composeError(Error(), "Zip encrypted entries not supported", "", i);
+                throw new Error(`Zip encrypted entries not supported at ${i}`);
             }
 
             const dostime = cdfh.modificationTime;
@@ -322,7 +317,7 @@ export class ZipFile {
 
             while (bitCnt < need) {
                 if (inCnt === bufEnd) {
-                    throw that.composeError(Error(), "Zip: inflate: Data overflow", that.options.zipName, -1);
+                    throw new Error(`Zip: inflate: Data overflow`);
                 }
                 out |= data[inCnt] << bitCnt; // eslint-disable-line no-bitwise
                 inCnt += 1;
@@ -357,7 +352,7 @@ export class ZipFile {
                 bitBuf = 0;
                 bitCnt = 0;
                 if (inCnt + 4 > bufEnd) {
-                    throw that.composeError(Error(), "Zip: inflate: Data overflow", "", inCnt);
+                    throw new Error(`Zip: inflate: Data overflow at pos ${inCnt}`);
                 }
 
                 let len = that.readUShort(inCnt);
@@ -365,12 +360,12 @@ export class ZipFile {
                 inCnt += 2;
 
                 if (data[inCnt] !== (~len & 0xFF) || data[inCnt + 1] !== ((~len >> 8) & 0xFF)) { // eslint-disable-line no-bitwise
-                    throw that.composeError(Error(), "Zip: inflate: Bad length", "", inCnt);
+                    throw new Error(`Zip: inflate: Bad length at pos ${inCnt}`);
                 }
                 inCnt += 2;
 
                 if (inCnt + len > bufEnd) {
-                    throw that.composeError(Error(), "Zip: inflate: Data overflow", "", inCnt);
+                    throw new Error(`Zip: inflate: Data overflow at pos ${inCnt}`);
                 }
 
                 // Compatibility: Instead of: outbuf.push.apply(outbuf, outbuf.slice(incnt, incnt + len)); outcnt += len; incnt += len;
@@ -388,7 +383,7 @@ export class ZipFile {
                     nCode = fnBits(4) + 4;
 
                 if (nLen > 0x11E || nDist > 0x1E) {
-                    throw that.composeError(Error(), "Zip: inflate: length/distance code overflow", "", 0);
+                    throw new Error(`Zip: inflate: length/distance code overflow`);
                 }
                 let i: number;
 
@@ -399,7 +394,7 @@ export class ZipFile {
                     lens[dynamicTableOrder[i]] = 0;
                 }
                 if (ZipFile.fnInflateConstruct(lenCode, lens, 19) !== 0) {
-                    throw that.composeError(Error(), "Zip: inflate: length codes incomplete", "", 0);
+                    throw new Error(`Zip: inflate: length codes incomplete`);
                 }
 
                 for (i = 0; i < nLen + nDist;) {
@@ -414,7 +409,7 @@ export class ZipFile {
 
                         if (symbol === 16) {
                             if (i === 0) {
-                                throw that.composeError(Error(), "Zip: inflate: repeat lengths with no first length", "", 0);
+                                throw new Error(`Zip: inflate: repeat lengths with no first length`);
                             }
                             len = lens[i - 1];
                             symbol = 3 + fnBits(2);
@@ -425,7 +420,7 @@ export class ZipFile {
                         }
 
                         if (i + symbol > nLen + nDist) {
-                            throw that.composeError(Error(), "Zip: inflate: more lengths than specified", "", 0);
+                            throw new Error(`Zip: inflate: more lengths than specified`);
                         }
                         while (symbol) {
                             lens[i] = len;
@@ -440,7 +435,7 @@ export class ZipFile {
 
                 if ((err1 < 0 || (err1 > 0 && nLen - lenCode.count[0] !== 1))
                     || (err2 < 0 || (err2 > 0 && nDist - distCode.count[0] !== 1))) {
-                    throw that.composeError(Error(), "Zip: inflate: bad literal or length codes", "", 0);
+                    throw new Error(`Zip: inflate: bad literal or length codes`);
                 }
             },
 
@@ -456,7 +451,7 @@ export class ZipFile {
                     if (symbol > 256) {
                         symbol -= 257;
                         if (symbol > 28) {
-                            throw that.composeError(Error(), "Zip: inflate: Invalid length/distance", "", 0);
+                            throw new Error(`Zip: inflate: Invalid length/distance`);
                         }
                         let len = startLens[symbol] + fnBits(lExt[symbol]);
 
@@ -464,7 +459,7 @@ export class ZipFile {
                         const dist = dists[symbol] + fnBits(dExt[symbol]);
 
                         if (dist > outCnt) {
-                            throw that.composeError(Error(), "Zip: inflate: distance out of range", "", 0);
+                            throw new Error(`Zip: inflate: distance out of range`);
                         }
                         // instead of outbuf.slice, we use...
                         while (len) {
@@ -507,7 +502,7 @@ export class ZipFile {
 
                     break;
                 default:
-                    throw this.composeError(Error(), "Zip: inflate: unsupported compression type" + type, "", 0);
+                    throw new Error(`Zip: inflate: unsupported compression type ${type}`);
             }
         } while (!last);
         return outBuf;
@@ -517,7 +512,7 @@ export class ZipFile {
         const cdfh = this.entryTable[name];
 
         if (!cdfh) {
-            throw this.composeError(Error(), "Zip: readBinaryData: file does not exist:" + name, "", 0);
+            throw new Error(`Zip: readBinaryData: file does not exist: ${name}`);
         }
 
         if (cdfh.compressionMethod === 0) { // stored
@@ -525,7 +520,7 @@ export class ZipFile {
         } else if (cdfh.compressionMethod === 8) { // deflated
             return this.inflate(cdfh.dataStart, cdfh.compressedSize, cdfh.size);
         } else {
-            throw this.composeError(Error(), "Zip: readBinaryData: compression method not supported:" + cdfh.compressionMethod, "", 0);
+            throw new Error(`Zip: readBinaryData: compression method not supported ${cdfh.compressionMethod}`);
         }
     }
 
