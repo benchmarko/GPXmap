@@ -2,10 +2,11 @@
 // (c) Marco Vieth, 2019
 //
 // Idea based on: https://github.com/frash23/jzsip/blob/master/jzsip.js (and Cpcemu: zip.cpp)
+// https://pkwaredownloads.blob.core.windows.net/pkware-general/Documentation/APPNOTE-6.3.9.TXT
 //
 interface ZipFileOptions {
-    data: Uint8Array,
-    zipName: string // for error messages
+    data: Uint8Array
+    //password?: string; // optional password for ZipCrypto
 }
 
 type CodeType = {
@@ -17,6 +18,7 @@ interface CentralDirFileHeader {
     readonly signature: number
     readonly version: number // version needed to extract (minimum)
     readonly flag: number // General purpose bit flag
+        // bit 0: encrypted; bit 6: strong encryption; bit 13: central directory encrypted
     readonly compressionMethod: number // compression method
     readonly modificationTime: number // File last modification time (DOS time)
     readonly crc: number // CRC-32 of uncompressed data
@@ -34,7 +36,7 @@ interface CentralDirFileHeader {
     dataStart: number
 }
 
-type ZipDirectoryType = Record<string, CentralDirFileHeader>
+export type ZipDirectoryType = Record<string, CentralDirFileHeader>
 
 interface EndOfCentralDir {
     readonly signature: number
@@ -69,6 +71,13 @@ function textDecoderDecodePolyfill(data: Uint8Array): string {
     return out;
 }
 
+// for debugging
+/*
+function getListAsHexString(list: Iterable<number>, pad = 2): string {
+    return Array.from(list).map(byte => byte.toString(16).padStart(pad, '0')).join(" ");
+}
+*/
+
 export class ZipFile {
     private readonly options: ZipFileOptions;
 
@@ -95,6 +104,93 @@ export class ZipFile {
         }
     }
 
+    // --- ZipCrypto implementation ---
+    // Make sure to use Math.imul for 32 bit unsigend! (https://matthewtolman.com/article/unsigned-integers-in-javascript)
+
+    private static createCrcTable(): Uint32Array {
+        const crcTable = new Uint32Array(256);
+        for (let i = 0; i < 256; i += 1) {
+            let c = i;
+            for (let j = 0; j < 8; j += 1) {
+                c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+            }
+            crcTable[i] = c >>> 0;
+        }
+        return crcTable;
+    }
+
+    private static crcTable?: Uint32Array = undefined;
+
+    private static zipCryptoCrc32(crc: number, c: number) {
+        const crcTable = ZipFile.crcTable || (ZipFile.crcTable = ZipFile.createCrcTable());
+        return ((crc >>> 8) ^ crcTable[(crc ^ c) & 0xff]) >>> 0;
+    };
+
+    private static zipCryptoUpdateKeys(keys: number[], c: number): void {
+        keys[0] = ZipFile.zipCryptoCrc32(keys[0], c);
+        keys[1] = (keys[1] + (keys[0] & 0xff)) >>> 0;
+        keys[1] = (Math.imul(keys[1], 134775813) >>> 0) + 1 >>> 0;
+        keys[2] = ZipFile.zipCryptoCrc32(keys[2], (keys[1] >>> 24) & 0xff);
+        //console.log("Updated keys:", getListAsHexString(keys, 8));
+    }
+
+    private static zipCryptoInitKeys(password: string): number[] {
+        const keys = [0x12345678, 0x23456789, 0x34567890];
+        //console.log("Initial keys:", getListAsHexString(keys, 8), "(start)");
+        for (let i = 0; i < password.length; i += 1) {
+            ZipFile.zipCryptoUpdateKeys(keys, password.charCodeAt(i));
+        }
+        //console.log("Initial keys:", getListAsHexString(keys, 8), "(pwd)");
+        return keys;
+    }
+
+    private static zipCryptoDecryptByte(keys: number[], c: number): number {
+        const temp = (keys[2] | 2) >>> 0;
+
+        const decrypted = c ^ ((Math.imul(temp, temp ^ 1) >>> 8) & 0xff);
+        ZipFile.zipCryptoUpdateKeys(keys, decrypted);
+        return decrypted;
+    }
+
+    private static zipCryptoDecrypt(data: Uint8Array, cdfh: CentralDirFileHeader, password: string): Uint8Array {
+        const keys = ZipFile.zipCryptoInitKeys(password);
+        const decryptedHeader = new Uint8Array(12);
+        //console.debug(`Zip: Header encrypted:`, getListAsHexString(data.subarray(0, 12)));
+        for (let i = 0; i < 12; i += 1) {
+            const c = ZipFile.zipCryptoDecryptByte(keys, data[i]);
+            decryptedHeader[i] = c;
+        }
+        //console.debug(`Zip: Header decrypted:`, getListAsHexString(decryptedHeader));
+
+        let checkByte: number;
+        if ((cdfh.flag & 0x8) !== 0) {
+            // Compare against the file time from extended local headers
+            // The check byte is the MSB of the file time
+            checkByte = (cdfh.modificationTime >> 8) & 0xff;
+        } else {
+            // Compare against the CRC otherwise
+            // The check byte is the MSB of the CRC
+            checkByte = (cdfh.crc >> 24) & 0xff;
+        }
+
+        if (decryptedHeader[11] !== checkByte) {
+            throw new Error("Zip: The password did not match.");
+        }
+
+        const out = new Uint8Array(data.length - 12);
+
+        //console.log(`File data encrypted (max 20 bytes):`, getListAsHexString(data.subarray(12, 12 + 20)));
+
+        for (let i = 12; i < data.length; i += 1) {
+            const c = ZipFile.zipCryptoDecryptByte(keys, data[i]);
+            out[i - 12] = c;
+        }
+        //console.log(`File data decrypted (max 20 bytes):`, getListAsHexString(out.subarray(0, 20)));
+        return out;
+    }
+    // --- ZipCrypto implementation end ---
+
+
     getZipDirectory(): ZipDirectoryType {
         return this.entryTable;
     }
@@ -103,48 +199,46 @@ export class ZipFile {
         return ZipFile.textDecoder.decode(data);
     }
 
+    private static getUint16(data: Uint8Array, i: number): number {
+        return ((data[i + 1]) << 8) | data[i]; // eslint-disable-line no-bitwise
+    }
+
+    private static getUint32(data: Uint8Array, i: number): number {
+        return (data[i + 3] << 24) | (data[i + 2] << 16) | (data[i + 1] << 8) | data[i]; // eslint-disable-line no-bitwise
+    }
+
     private readAsUTF8(offset: number, len: number): string {
         const data = this.data.subarray(offset, offset + len);
         return ZipFile.convertUint8ArrayToUtf8(data);
     }
 
-    private readUInt(i: number): number {
-        const data = this.data;
-
-        return (data[i + 3] << 24) | (data[i + 2] << 16) | (data[i + 1] << 8) | data[i]; // eslint-disable-line no-bitwise
-    }
-
-    private readUShort(i: number): number {
-        const data = this.data;
-
-        return ((data[i + 1]) << 8) | data[i]; // eslint-disable-line no-bitwise
-    }
-
     private readEocd(eocdPos: number): EndOfCentralDir { // read End of central directory
+        const data = this.data;
         const eocd: EndOfCentralDir = {
-            signature: this.readUInt(eocdPos),
-            entries: this.readUShort(eocdPos + 10), // total number of central directory records
-            cdfhOffset: this.readUInt(eocdPos + 16), // offset of start of central directory, relative to start of archive
-            cdSize: this.readUInt(eocdPos + 20) // size of central directory (just for information)
+            signature: ZipFile.getUint32(data, eocdPos),
+            entries: ZipFile.getUint16(data, eocdPos + 10), // total number of central directory records
+            cdfhOffset: ZipFile.getUint32(data, eocdPos + 16), // offset of start of central directory, relative to start of archive
+            cdSize: ZipFile.getUint32(data, eocdPos + 20) // size of central directory (just for information)
         };
 
         return eocd;
     }
 
     private readCdfh(pos: number): CentralDirFileHeader { // read Central directory file header
+        const data = this.data;
         const cdfh: CentralDirFileHeader = {
-            signature: this.readUInt(pos),
-            version: this.readUShort(pos + 6), // version needed to extract (minimum)
-            flag: this.readUShort(pos + 8), // General purpose bit flag
-            compressionMethod: this.readUShort(pos + 10), // compression method
-            modificationTime: this.readUShort(pos + 12), // File last modification time (DOS time)
-            crc: this.readUInt(pos + 16), // CRC-32 of uncompressed data
-            compressedSize: this.readUInt(pos + 20), // compressed size
-            size: this.readUInt(pos + 24), // Uncompressed size
-            fileNameLength: this.readUShort(pos + 28), // file name length
-            extraFieldLength: this.readUShort(pos + 30), // extra field length
-            fileCommentLength: this.readUShort(pos + 32), // file comment length
-            localOffset: this.readUInt(pos + 42), // relative offset of local file header
+            signature: ZipFile.getUint32(data, pos),
+            version: ZipFile.getUint16(data, pos + 6), // version needed to extract (minimum)
+            flag: ZipFile.getUint16(data, pos + 8), // General purpose bit flag
+            compressionMethod: ZipFile.getUint16(data, pos + 10), // compression method
+            modificationTime: ZipFile.getUint16(data, pos + 12), // File last modification time (DOS time)
+            crc: ZipFile.getUint32(data, pos + 16), // CRC-32 of uncompressed data
+            compressedSize: ZipFile.getUint32(data, pos + 20), // compressed size
+            size: ZipFile.getUint32(data, pos + 24), // Uncompressed size
+            fileNameLength: ZipFile.getUint16(data, pos + 28), // file name length
+            extraFieldLength: ZipFile.getUint16(data, pos + 30), // extra field length
+            fileCommentLength: ZipFile.getUint16(data, pos + 32), // file comment length
+            localOffset: ZipFile.getUint32(data, pos + 42), // relative offset of local file header
 
             // set later...
             name: "",
@@ -171,9 +265,9 @@ export class ZipFile {
 
         while (i >= n) {
             i -= 1;
-            if (this.readUInt(i) === ZipConstants.eocdSignature) {
+            if (ZipFile.getUint32(data, i) === ZipConstants.eocdSignature) {
                 eocd = this.readEocd(i);
-                if (this.readUInt(eocd.cdfhOffset) === ZipConstants.cdfhSignature) {
+                if (ZipFile.getUint32(data, eocd.cdfhOffset) === ZipConstants.cdfhSignature) {
                     break; // looks good, so we assume that we have found the EOCD
                 }
             }
@@ -206,8 +300,12 @@ export class ZipFile {
             cdfh.comment = this.readAsUTF8(offset, cdfh.fileCommentLength);
             offset += cdfh.fileCommentLength;
 
-            if ((cdfh.flag & 1) === 1) { // eslint-disable-line no-bitwise
-                throw new Error(`Zip encrypted entries not supported at ${i}`);
+            if ((cdfh.flag & 0x40) === 0x40) { // bit 6 set?
+                throw new Error(`Zip: Strong encryption not suppoered.`);
+            }
+
+            if ((cdfh.flag & 0x2000) === 0x2000) { // bit 13 set?
+                throw new Error(`Zip: Strong directory encryption not suppoered.`);
             }
 
             const dostime = cdfh.modificationTime;
@@ -216,11 +314,11 @@ export class ZipFile {
             cdfh.timestamp = new Date(((dostime >> 25) & 0x7F) + 1980, ((dostime >> 21) & 0x0F) - 1, (dostime >> 16) & 0x1F, (dostime >> 11) & 0x1F, (dostime >> 5) & 0x3F, (dostime & 0x1F) << 1).getTime(); // eslint-disable-line no-bitwise
 
             // local file header... much more info
-            if (this.readUInt(cdfh.localOffset) !== ZipConstants.lfhSignature) {
+            if (ZipFile.getUint32(data, cdfh.localOffset) !== ZipConstants.lfhSignature) {
                 console.error("Zip: readZipDirectory: LFH signature not found at offset", cdfh.localOffset);
             }
 
-            const lfhExtrafieldLength = this.readUShort(cdfh.localOffset + 28); // extra field length
+            const lfhExtrafieldLength = ZipFile.getUint16(data, cdfh.localOffset + 28); // extra field length
 
             cdfh.dataStart = cdfh.localOffset + ZipConstants.lfhLen + cdfh.name.length + lfhExtrafieldLength;
 
@@ -292,7 +390,7 @@ export class ZipFile {
         ZipFile.fnInflateConstruct(distCode, lens, 0x1E);
     }
 
-    private inflate(offset: number, compressedSize: number, finalSize: number): Uint8Array {
+    private inflate(data: Uint8Array, offset: number, compressedSize: number, finalSize: number): Uint8Array {
         /* eslint-disable array-element-newline */
         const startLens = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258],
             lExt = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0],
@@ -300,8 +398,6 @@ export class ZipFile {
             dExt = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13],
             dynamicTableOrder = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15],
             /* eslint-enable array-element-newline */
-            that = this, // eslint-disable-line @typescript-eslint/no-this-alias
-            data = this.data,
             bufEnd = offset + compressedSize,
             outBuf = new Uint8Array(finalSize);
         let inCnt = offset, // read position
@@ -355,7 +451,7 @@ export class ZipFile {
                     throw new Error(`Zip: inflate: Data overflow at pos ${inCnt}`);
                 }
 
-                let len = that.readUShort(inCnt);
+                let len = ZipFile.getUint16(data, inCnt);
 
                 inCnt += 2;
 
@@ -508,20 +604,37 @@ export class ZipFile {
         return outBuf;
     }
 
-    public readBinaryData(name: string): Uint8Array {
+    public readBinaryData(name: string, password?: string): Uint8Array {
+        const data = this.data;
         const cdfh = this.entryTable[name];
-
         if (!cdfh) {
-            throw new Error(`Zip: readBinaryData: file does not exist: ${name}`);
+            throw new Error(`Zip: readBinaryData: File does not exist: ${name}`);
         }
 
-        if (cdfh.compressionMethod === 0) { // stored
-            return this.data.subarray(cdfh.dataStart, cdfh.dataStart + cdfh.size);
-        } else if (cdfh.compressionMethod === 8) { // deflated
-            return this.inflate(cdfh.dataStart, cdfh.compressedSize, cdfh.size);
+        const isEncrypted = cdfh.flag & 1;
+        console.log(`Zip: Extracting ${name}: compressedSize=${cdfh.compressedSize} size=${cdfh.size} compressionMethod=${cdfh.compressionMethod} encrypted=${isEncrypted}`);
+
+        let fileData = data.subarray(cdfh.dataStart, cdfh.dataStart + cdfh.compressedSize);
+        if (isEncrypted) {
+            if (!password) {
+                throw new Error(`Zip: Password required`);
+            }
+            // Read encrypted data (includes 12-byte header)
+            //const encrypted = data.subarray(cdfh.dataStart, cdfh.dataStart + cdfh.compressedSize);
+            fileData = ZipFile.zipCryptoDecrypt(fileData, cdfh, password);
+        }
+
+        if (cdfh.compressionMethod === 0) {
+            // stored
+            //done // fileData = this.data.subarray(cdfh.dataStart, cdfh.dataStart + cdfh.size);
+        } else if (cdfh.compressionMethod === 8) {
+            // deflated
+            //fileData = this.inflate(fileData, cdfh.dataStart, cdfh.compressedSize, cdfh.size);
+            fileData = this.inflate(fileData, 0, cdfh.compressedSize, cdfh.size);
         } else {
             throw new Error(`Zip: readBinaryData: compression method not supported ${cdfh.compressionMethod}`);
         }
+        return fileData;
     }
 
     public static isProbablyZipFile(data: Uint8Array): boolean {

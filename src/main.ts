@@ -194,32 +194,58 @@ ${moreInfo}
         .openOn(map);
 }
 
+/*
+function readZipData(zip: ZipFile, name: string, password?: string): Uint8Array | undefined {
+    try {
+       const binaryData = zip.readBinaryData(name, password);
+       return binaryData;
+    } catch (e) {
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        console.error(errorMsg);
+    }
+}
+*/
+
 function processZipFile(uint8Array: Uint8Array, zipName: string): string[] {
     const messages: string[] = []
     const zip = new ZipFile({
-        data: uint8Array, // rather data
-        zipName: zipName
+        data: uint8Array
     });
 
-    const zipDirectory = zip.getZipDirectory(),
-        entries = Object.keys(zipDirectory);
+    let password = '';
+
+    const zipDirectory = zip.getZipDirectory();
+    const entries = Object.keys(zipDirectory);
+
+    console.log(`processZipFile: ${zipName}: with ${entries.length} entries`);
 
     for (let i = 0; i < entries.length; i += 1) {
-        const name2 = entries[i];
+        const name = entries[i];
 
-        if (name2.startsWith("__MACOSX/")) { // MacOS X creates some extra folder in ZIP files
-            console.log("processZipFile: Ignoring file:", name2);
+        if (zipDirectory[name].isDirectory) {
+            console.log(`processZipFile: Ignoring directory: ${name}`);
+        } else if (name.startsWith("__MACOSX/")) { // MacOS X creates some extra folder in ZIP files
+            console.log(`processZipFile: Ignoring file: ${name}`);
         } else {
-            const binaryData = zip.readBinaryData(name2);
-            if (binaryData) {
-                if (name2.endsWith('.zip') || ZipFile.isProbablyZipFile(binaryData)) {
-                    console.log(`File ${name2} is a ZIP file, processing recursively.`);
-                    const messages2 = processZipFile(binaryData, name2);
-                    messages.push(...messages2);
-                } else {
-                    const utf8Text = ZipFile.convertUint8ArrayToUtf8(binaryData);
-                    messages.push(parseGpxFile(utf8Text, name2));
+            if ((zipDirectory[name].flag & 0x01) && !password) { // encrypted and no password set, yet?
+                password = prompt(`Password for ${name.split("/").pop()}:`) || '';
+            }
+            try {
+                const binaryData = zip.readBinaryData(name, password);
+                if (binaryData) {
+                    if (name.endsWith('.zip') || ZipFile.isProbablyZipFile(binaryData)) {
+                        console.log(`File ${name} is a ZIP file, processing recursively.`);
+                        const messages2 = processZipFile(binaryData, name);
+                        messages.push(...messages2);
+                    } else {
+                        const utf8Text = ZipFile.convertUint8ArrayToUtf8(binaryData);
+                        const message = parseGpxFile(utf8Text, name);
+                        messages.push(message);
+                    }
                 }
+            } catch (e) {
+                const errorMsg = e instanceof Error ? e.message : String(e);
+                messages.push(`<span style="color: red">File ${name}: ${errorMsg}</span><br>\n`);
             }
         }
     }
@@ -236,7 +262,7 @@ function parseGpxFile(text: string, name: string): string {
 
     const errorNode = xml.querySelector("parsererror");
     if (errorNode) {
-        throw new Error(`Error parsing GPX file ${name}: ${errorNode.textContent}`);
+        throw new Error(`Error parsing ${name}: ${errorNode.textContent}`);
     }
 
     const wpts = Array.from(xml.getElementsByTagName('wpt'));
