@@ -6,7 +6,6 @@
 //
 interface ZipFileOptions {
     data: Uint8Array
-    //password?: string; // optional password for ZipCrypto
 }
 
 type CodeType = {
@@ -71,13 +70,6 @@ function textDecoderDecodePolyfill(data: Uint8Array): string {
     return out;
 }
 
-// for debugging
-/*
-function getListAsHexString(list: Iterable<number>, pad = 2): string {
-    return Array.from(list).map(byte => byte.toString(16).padStart(pad, '0')).join(" ");
-}
-*/
-
 export class ZipFile {
     private readonly options: ZipFileOptions;
 
@@ -131,16 +123,13 @@ export class ZipFile {
         keys[1] = (keys[1] + (keys[0] & 0xff)) >>> 0;
         keys[1] = (Math.imul(keys[1], 134775813) >>> 0) + 1 >>> 0;
         keys[2] = ZipFile.zipCryptoCrc32(keys[2], (keys[1] >>> 24) & 0xff);
-        //console.log("Updated keys:", getListAsHexString(keys, 8));
     }
 
     private static zipCryptoInitKeys(password: string): number[] {
         const keys = [0x12345678, 0x23456789, 0x34567890];
-        //console.log("Initial keys:", getListAsHexString(keys, 8), "(start)");
         for (let i = 0; i < password.length; i += 1) {
             ZipFile.zipCryptoUpdateKeys(keys, password.charCodeAt(i));
         }
-        //console.log("Initial keys:", getListAsHexString(keys, 8), "(pwd)");
         return keys;
     }
 
@@ -155,22 +144,16 @@ export class ZipFile {
     private static zipCryptoDecrypt(data: Uint8Array, cdfh: CentralDirFileHeader, password: string): Uint8Array {
         const keys = ZipFile.zipCryptoInitKeys(password);
         const decryptedHeader = new Uint8Array(12);
-        //console.debug(`Zip: Header encrypted:`, getListAsHexString(data.subarray(0, 12)));
         for (let i = 0; i < 12; i += 1) {
             const c = ZipFile.zipCryptoDecryptByte(keys, data[i]);
             decryptedHeader[i] = c;
         }
-        //console.debug(`Zip: Header decrypted:`, getListAsHexString(decryptedHeader));
 
         let checkByte: number;
         if ((cdfh.flag & 0x8) !== 0) {
-            // Compare against the file time from extended local headers
-            // The check byte is the MSB of the file time
-            checkByte = (cdfh.modificationTime >> 8) & 0xff;
+            checkByte = (cdfh.modificationTime >> 8) & 0xff; // check MSB of the file time
         } else {
-            // Compare against the CRC otherwise
-            // The check byte is the MSB of the CRC
-            checkByte = (cdfh.crc >> 24) & 0xff;
+            checkByte = (cdfh.crc >> 24) & 0xff; // check MSB of CRC
         }
 
         if (decryptedHeader[11] !== checkByte) {
@@ -178,14 +161,10 @@ export class ZipFile {
         }
 
         const out = new Uint8Array(data.length - 12);
-
-        //console.log(`File data encrypted (max 20 bytes):`, getListAsHexString(data.subarray(12, 12 + 20)));
-
         for (let i = 12; i < data.length; i += 1) {
             const c = ZipFile.zipCryptoDecryptByte(keys, data[i]);
             out[i - 12] = c;
         }
-        //console.log(`File data decrypted (max 20 bytes):`, getListAsHexString(out.subarray(0, 20)));
         return out;
     }
     // --- ZipCrypto implementation end ---
@@ -619,17 +598,11 @@ export class ZipFile {
             if (!password) {
                 throw new Error(`Zip: Password required`);
             }
-            // Read encrypted data (includes 12-byte header)
-            //const encrypted = data.subarray(cdfh.dataStart, cdfh.dataStart + cdfh.compressedSize);
-            fileData = ZipFile.zipCryptoDecrypt(fileData, cdfh, password);
+            fileData = ZipFile.zipCryptoDecrypt(fileData, cdfh, password); // read encrypted data (includes 12-byte header)
         }
 
-        if (cdfh.compressionMethod === 0) {
-            // stored
-            //done // fileData = this.data.subarray(cdfh.dataStart, cdfh.dataStart + cdfh.size);
-        } else if (cdfh.compressionMethod === 8) {
-            // deflated
-            //fileData = this.inflate(fileData, cdfh.dataStart, cdfh.compressedSize, cdfh.size);
+        if (cdfh.compressionMethod === 0) { // stored
+        } else if (cdfh.compressionMethod === 8) { // deflated
             fileData = this.inflate(fileData, 0, cdfh.compressedSize, cdfh.size);
         } else {
             throw new Error(`Zip: readBinaryData: compression method not supported ${cdfh.compressionMethod}`);
@@ -641,7 +614,7 @@ export class ZipFile {
         if (data.length < 4) {
             return false; // too short to be a valid ZIP file
         }
-        // Check for the Local File Header (LFH) signature at the beginning of the file
+        // check for the Local File Header (LFH) signature at the beginning of the file (we ignore that there can be any preceding data)
         const lfhSignature = ZipConstants.lfhSignature;
         const i = 0; // we only check the first 4 bytes
         const firstFourBytes = (data[i + 3] << 24) | (data[i + 2] << 16) | (data[i + 1] << 8) | data[i]; // eslint-disable-line no-bitwise

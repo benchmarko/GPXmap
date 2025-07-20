@@ -194,18 +194,6 @@ ${moreInfo}
         .openOn(map);
 }
 
-/*
-function readZipData(zip: ZipFile, name: string, password?: string): Uint8Array | undefined {
-    try {
-       const binaryData = zip.readBinaryData(name, password);
-       return binaryData;
-    } catch (e) {
-        const errorMsg = e instanceof Error ? e.message : String(e);
-        console.error(errorMsg);
-    }
-}
-*/
-
 function processZipFile(uint8Array: Uint8Array, zipName: string): string[] {
     const messages: string[] = []
     const zip = new ZipFile({
@@ -338,7 +326,6 @@ async function onGpxFileChange(event: Event): Promise<void> {
 }
 
 function main(): void {
-    // Initialize Leaflet map
     map.setView([0, 0], 2);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap'
