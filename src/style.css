@@ -41,7 +41,7 @@ body {
   resize: vertical;
 }
 
-#waypointCount {
+.smallFont {
   font-size: 80%;
 }
 

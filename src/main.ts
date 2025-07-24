@@ -99,7 +99,7 @@ function getIcon(cacheType: string): L.DivIcon {
 }
 
 // Helper to render (filtered) markers
-function renderMarkers(markersData: WaypointDataType[]): void {
+function renderMarkers(markersData: WaypointDataType[], keepView: boolean): void {
     if (map.hasLayer(waypointGroup)) {
         clearMarkersFromGroup(waypointGroup);
         map.removeLayer(waypointGroup);
@@ -111,17 +111,20 @@ function renderMarkers(markersData: WaypointDataType[]): void {
             waypointGroup!.addLayer(marker);
         });
         waypointGroup.addTo(map);
-        map.fitBounds(waypointGroup.getBounds().pad(0.5));
+        if (!keepView) {
+            map.fitBounds(waypointGroup.getBounds().pad(0.5));
+        }
     }
 }
 
 // Filter logic
 function filterWaypoints(query: string): void {
     const q = query.trim().toLowerCase();
+    const keepView = document.getElementById('keepViewInput') as HTMLInputElement;
     const waypointData = Object.values(waypointDataMap);
     const waypointCount = document.getElementById('waypointCount') as HTMLSpanElement;
     if (!q) {
-        renderMarkers(waypointData);
+        renderMarkers(waypointData, keepView.checked);
         waypointCount.innerText = String(waypointData.length);
         return;
     }
@@ -132,7 +135,7 @@ function filterWaypoints(query: string): void {
             data.cacheInfo.toLowerCase().includes(q)
         );
     });
-    renderMarkers(filtered);
+    renderMarkers(filtered, keepView.checked);
     waypointCount.innerText = `${filtered.length} / ${waypointData.length}`;
 }
 
@@ -253,6 +256,7 @@ function parseGpxFile(text: string, name: string): string {
         throw new Error(`Error parsing ${name}: ${errorNode.textContent}`);
     }
 
+    let overwritten = 0;
     const wpts = Array.from(xml.getElementsByTagName('wpt'));
 
     for (const wpt of wpts) {
@@ -275,9 +279,13 @@ function parseGpxFile(text: string, name: string): string {
             // TODO: logs?
             cacheInfo = `- Cache Name: ${cacheName}<br>\n- Type: ${cacheType}<br>\n- Container: ${container}<br>\n- Archived: ${archived}<br>\n- Available: ${available}<br>\n- Hints: ${hints}<br>\n- Description:<br>\n${longDesc}`;
         }
+        if (name in waypointDataMap) {
+            overwritten += 1;
+        }
         waypointDataMap[name] = { name, lat, lon, type, desc, cacheInfo };
     }
-    return `Processed file ${name} with ${wpts.length} waypoints.`;
+    const overwrittenStr = overwritten ? ` (overwritten: ${overwritten})` : '';
+    return `Processed file ${name} with ${wpts.length} waypoints${overwrittenStr}.`;
 }
 
 // Handle file upload
