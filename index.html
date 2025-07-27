@@ -5,22 +5,26 @@
   <meta charset="UTF-8" />
   <!-- <link rel="icon" type="image/svg+xml" href="/vite.svg" /> -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GPX Map v0.1.6</title>
-  <script type="module" crossorigin src="/GPXmap/assets/index-BFze_2Ul.js"></script>
-  <link rel="stylesheet" crossorigin href="/GPXmap/assets/index-DtNhssSw.css">
+  <title>GPX Map v0.1.8</title>
+  <script type="module" crossorigin src="/GPXmap/assets/index-B19-8ZSr.js"></script>
+  <link rel="stylesheet" crossorigin href="/GPXmap/assets/index-Cm5cs4ub.css">
 </head>
 
 <body>
   <div id="app">
     <div id="top">
       <div>GPX Map</div>
-      <input type="file" id="gpxFile"
-        accept=".gpx,application/gpx+xml,.zip,application/x-zip-compressed,application/zip" multiple />
-      <span>
-        <input type="text" id="waypointSearch" placeholder="Search waypoints" />
-        <button id="waypointSearchClear" title="Clear search">&times;</button>
-        <span id="waypointCount" title="Waypoint Count">0</span>
-      </span>
+      <div id="menuLine" class="smallFont">
+        <input type="file" id="gpxFile"
+          accept=".gpx,application/gpx+xml,.zip,application/x-zip-compressed,application/zip" multiple />
+        <span>
+          <input type="text" id="waypointSearch" placeholder="Search waypoints" />
+          <button id="waypointSearchClear" title="Clear search">&times;</button>
+          <span id="waypointCount" title="Waypoint Count">0</span>
+        </span>
+        <input type="checkbox" id="keepViewInput" title="Keep view on searching">
+        <label for="keepViewInput" title="Keep view on searching">Keep View</label>
+      </div>
     </div>
     <div id="map"></div>
     <div id="waypointInfo" placeholder="Waypoint info will appear here...">
