@@ -4,6 +4,18 @@ import 'leaflet.markercluster';
 import type { MarkerClusterGroup } from 'leaflet';
 import { ZipFile } from "./ZipFile";
 
+export type ConfigEntryType = string | number | boolean;
+
+type ConfigType = {
+    debug: number;
+    search: string;
+};
+
+const config: ConfigType = {
+    debug: 0,
+    search: ""
+};
+
 
 type WaypointDataType = {
     name: string;
@@ -195,6 +207,14 @@ ${moreInfo}
         .setLatLng(marker.getLatLng())
         .setContent(popupContent)
         .openOn(map);
+
+    //<details><summary>Solver</summary><div class="gc_solver"> ... </div></details>
+    //const solverData = data.cacheInfo.match(/<div class="gc_solver">([\S\s]+?)<\/div>/);
+    const solverData = data.cacheInfo.match(/<div class="gc_solver">(.+?)<\/div>/s);
+    if (solverData && solverData[1]) {
+        const solverCode = solverData[1].replace(/<br\/?>\n/g, '\n').trim();
+        console.log("TTT: solverCode=", solverCode);
+    }
 }
 
 function processZipFile(uint8Array: Uint8Array, zipName: string): string[] {
@@ -333,7 +353,61 @@ async function onGpxFileChange(event: Event): Promise<void> {
     console.log(`Processed in ${endTime - startTime} ms`);
 }
 
+
+function fnDecodeUri(s: string): string {
+    let decoded = "";
+
+    try {
+        decoded = decodeURIComponent(s.replace(/\+/g, " "));
+    } catch (err) {
+        if (err instanceof Error) {
+            err.message += ": " + s;
+        }
+        console.error(err);
+    }
+    return decoded;
+}
+
+function parseUri(config: Record<string, ConfigEntryType>): string[] {
+    const urlQuery = window.location.search.substring(1);
+    const rSearch = /([^&=]+)=?([^&]*)/g;
+    const args: string[] = [];
+    let match: RegExpExecArray | null;
+
+    while ((match = rSearch.exec(urlQuery)) !== null) {
+        const name = fnDecodeUri(match[1]);
+        const value = fnDecodeUri(match[2]);
+
+        if (value !== null && config[name] !== undefined) {
+            args.push(name + "=" + value);
+        }
+    }
+    return args;
+}
+
+function parseArgs(args: string[], config: Record<string, ConfigEntryType>): Record<string, ConfigEntryType> {
+    for (const arg of args) {
+        const [name, ...valueParts] = arg.split("=");
+        const nameType = typeof config[name];
+
+        let value: ConfigEntryType = valueParts.join("=");
+        if (value !== undefined) {
+            if (nameType === "boolean") {
+                value = value === "true";
+            } else if (nameType === "number") {
+                value = Number(value);
+            }
+            config[name] = value;
+        }
+    }
+    return config;
+}
+
+
 function main(): void {
+    const args = parseUri(config);
+    parseArgs(args, config);
+
     map.setView([0, 0], 2);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap'
@@ -349,6 +423,9 @@ function main(): void {
         const value = (e.target as HTMLInputElement).value;
         filterWaypoints(value);
     }, 400));
+    if (config.search) {
+        waypointSearch.value = config.search;
+    }
 
     const waypointSearchClear = document.getElementById('waypointSearchClear') as HTMLButtonElement;
     waypointSearchClear.addEventListener('click', (_e) => {
