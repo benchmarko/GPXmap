@@ -36,7 +36,7 @@ const waypointDataMap: WaypointDataMapType = {}; // Store markers data for filte
 
 const map = L.map('map');
 const waypointGroup = L.markerClusterGroup();
-const popup = L.popup({ offset: L.point(0, -20) });
+const popup = L.popup();
 
 // Marker pool for reuse
 const markerPool: MarkerType[] = [];
@@ -205,15 +205,12 @@ ${moreInfo}
 
     popup
         .setLatLng(marker.getLatLng())
-        .setContent(popupContent)
-        .openOn(map);
+        .setContent(popupContent);
 
-    //<details><summary>Solver</summary><div class="gc_solver"> ... </div></details>
-    //const solverData = data.cacheInfo.match(/<div class="gc_solver">([\S\s]+?)<\/div>/);
     const solverData = data.cacheInfo.match(/<div class="gc_solver">(.+?)<\/div>/s);
     if (solverData && solverData[1]) {
         const solverCode = solverData[1].replace(/<br\/?>\n/g, '\n').trim();
-        console.log("TTT: solverCode=", solverCode);
+        console.debug("DEBUG: solverCode=", solverCode);
     }
 }
 
@@ -415,6 +412,8 @@ function main(): void {
 
     waypointGroup.on('click', onWaypointGroupClick);
 
+    waypointGroup.bindPopup(popup);
+
     const gpxFile = document.getElementById('gpxFile') as HTMLInputElement;
     gpxFile.addEventListener('change', onGpxFileChange);
 
@@ -423,6 +422,7 @@ function main(): void {
         const value = (e.target as HTMLInputElement).value;
         filterWaypoints(value);
     }, 400));
+
     if (config.search) {
         waypointSearch.value = config.search;
     }
