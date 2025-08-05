@@ -44,6 +44,12 @@ body {
   font-size: 80%;
 }
 
+.checkbox-group label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+}
+
 @media only screen and (max-width: 700px) {
   body {
     margin: 0em;

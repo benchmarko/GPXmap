@@ -4,15 +4,25 @@ import 'leaflet.markercluster';
 import type { MarkerClusterGroup } from 'leaflet';
 import { ZipFile } from "./ZipFile";
 
+declare global {
+    interface Window {
+        GPXmap: {
+            addItem: (key: string, input: string) => void
+        };
+    }
+}
+
 export type ConfigEntryType = string | number | boolean;
 
 type ConfigType = {
     debug: number;
+    file: string,
     search: string;
 };
 
 const config: ConfigType = {
     debug: 0,
+    file: "",
     search: ""
 };
 
@@ -40,6 +50,13 @@ const popup = L.popup();
 
 // Marker pool for reuse
 const markerPool: MarkerType[] = [];
+
+function asyncDelay(fn: () => void, timeout: number): Promise<number> {
+    return (async () => {
+        const timerId = window.setTimeout(fn, timeout);
+        return timerId;
+    })();
+}
 
 function deleteAllItems(items: Record<string, unknown>) {
     Object.keys(items).forEach(key => delete items[key]);
@@ -321,7 +338,7 @@ function parseGpxFile(text: string, name: string): string {
 }
 
 // Handle file upload
-async function onGpxFileChange(event: Event): Promise<void> {
+async function onFileInputChange(event: Event): Promise<void> {
     if (popup.isOpen()) {
         popup.close();
     }
@@ -345,9 +362,21 @@ async function onGpxFileChange(event: Event): Promise<void> {
                 const messages = processZipFile(new Uint8Array(arrayBuffer), file.name);
                 infoHtml += messages.map((message) => `<span>${message}</span><br>\n`).join('');
             } else {
-                const text = await file.text();
-                const message = parseGpxFile(text, file.name);
-                infoHtml += `<span>${message}</span><br>\n`;
+                let fileName = file.name;
+                let text = await file.text();
+                if (fileName.endsWith('.b64')) {
+                    text = atob(text);
+                    fileName = fileName.slice(0, -4); // Remove .b64 suffix
+                }
+                if (fileName.endsWith('.zip')) {
+                    const binaryData = new Uint8Array(text.split('').map(c => c.charCodeAt(0)));
+                    const messages = processZipFile(binaryData, file.name);
+                    infoHtml += messages.map((message) => `<span>${message}</span><br>\n`).join('');
+                } else { //if (fileName.endsWith('.gpx')) {
+                    // Process GPX file
+                    const message = parseGpxFile(text, file.name);
+                    infoHtml += `<span>${message}</span><br>\n`;
+                }
             }
         } catch (e) {
             const errorMsg = e instanceof Error ? e.message : String(e);
@@ -365,6 +394,7 @@ async function onGpxFileChange(event: Event): Promise<void> {
     console.log(`Processed in ${endTime - startTime} ms`);
 }
 
+// *** start location service
 
 function locationShowPosition(position: GeolocationPosition) {
     const latitude = position.coords.latitude;
@@ -441,6 +471,68 @@ function onShowLocationInputChange(event: Event): void {
     }
 }
 
+// *** end location service
+
+function addItem(key: string, input: string): void {
+    input = input.replace(/^\n/, "").replace(/\n$/, ""); // remove preceding and trailing newlines
+
+    if (!key) { // maybe ""
+        console.warn("addItem: no key!");
+        key = "unknown";
+    }
+
+    const fileInput = document.getElementById('fileInput') as HTMLInputElement;
+
+    // see also: https://pqina.nl/blog/set-value-to-file-input/
+    const type = key.endsWith('.zip') ? 'application/zip' : 'text/plain';
+    //key.endsWith('.gpx') ? 'application/gpx+xml' : 'text/plain';
+    const myFile = new File([input], key, {
+        type, //'text/plain',
+        lastModified: Date.now()
+    });
+
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(myFile);
+    fileInput.files = dataTransfer.files;
+    fileInput.dispatchEvent(new Event("change"));
+};
+
+async function loadScriptOrStyle(script: HTMLScriptElement | HTMLLinkElement): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const onScriptLoad = function (event: Event) {
+            const type = event.type; // "load" or "error"
+            const node = event.currentTarget as HTMLScriptElement | HTMLLinkElement;
+            const key = node.getAttribute("data-key") as string;
+
+            node.removeEventListener("load", onScriptLoad, false);
+            node.removeEventListener("error", onScriptLoad, false);
+
+            if (type === "load") {
+                resolve(key);
+            } else {
+                reject(key);
+            }
+        };
+        script.addEventListener("load", onScriptLoad, false);
+        script.addEventListener("error", onScriptLoad, false);
+        document.getElementsByTagName("head")[0].appendChild(script);
+    });
+}
+
+async function loadScript(url: string, key: string): Promise<string> {
+    const script = document.createElement("script");
+
+    script.type = "text/javascript";
+    script.async = true;
+    script.src = url;
+
+    script.setAttribute("data-key", key);
+
+    return loadScriptOrStyle(script);
+}
+
+// *** start args
+
 function fnDecodeUri(s: string): string {
     let decoded = "";
 
@@ -490,6 +582,7 @@ function parseArgs(args: string[], config: Record<string, ConfigEntryType>): Rec
     return config;
 }
 
+// *** end args
 
 function main(): void {
     const args = parseUri(config);
@@ -503,8 +596,8 @@ function main(): void {
     waypointGroup.on('click', onWaypointGroupClick);
     waypointGroup.bindPopup(popup);
 
-    const gpxFile = document.getElementById('gpxFile') as HTMLInputElement;
-    gpxFile.addEventListener('change', onGpxFileChange);
+    const fileInput = document.getElementById('fileInput') as HTMLInputElement;
+    fileInput.addEventListener('change', onFileInputChange);
 
     const waypointSearch = document.getElementById('waypointSearch') as HTMLInputElement;
     waypointSearch.addEventListener('input', debounce((e) => {
@@ -526,6 +619,24 @@ function main(): void {
     showLocationInput.addEventListener('change', onShowLocationInputChange);
 
     locationMarker.bindPopup(locationPopup);
+
+    window.GPXmap = {
+        addItem: (key: string, input: string) => {
+            addItem(key, input);
+        }
+    };
+
+    asyncDelay(async () => {
+        if (config.file) {
+            const scriptName = config.file;
+            const key = config.file;
+            try {
+                await loadScript(scriptName, key);
+            } catch (error) {
+                console.error("Load Example", scriptName, error);
+            }
+        }
+    }, 10);
 }
 
 main();
