@@ -174,19 +174,8 @@ function position2dmm(lat: number, lon: number): string {
     return latNS + " " + String(latDeg).padStart(2, '0') + "° " + latMin.toFixed(3).padStart(6, '0') + " " + lonEW + " " + String(lonDeg).padStart(3, '0') + "° " + lonMin.toFixed(3).padStart(6, '0');
 }
 
-function onWaypointGroupClick(e: L.LeafletMouseEvent): void {
-    const marker = e.propagatedFrom as MarkerType;
-    const data = waypointDataMap[marker.waypointName];
-    const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement;
-
-    const desc = insertNewlineAtLastMatch(insertNewlineAtLastMatch(data.desc, ' by ', true), ',', false);
-
-    const dmm = position2dmm(data.lat, data.lon);
-
-    const cacheInfoWithBr = data.cacheInfo ? `<br>\n${data.cacheInfo}<br>\n` : '';
-    waypointInfo.innerHTML = `Name: ${data.name}<br>\n${dmm}<br>\n${data.desc}<br>\n${cacheInfoWithBr}`;
-
-const moreInfo = data.cacheInfo ? `
+function preparePopupContent(data: WaypointDataType, distance: number) {
+    const moreInfo = data.cacheInfo ? `
 <details style="margin-top:4px;">
     <summary>More info</summary>
     <div style="margin-top:4px;">
@@ -196,12 +185,38 @@ const moreInfo = data.cacheInfo ? `
     </div>
 </details>` : '';
 
+    const dmm = position2dmm(data.lat, data.lon);
+    const desc = insertNewlineAtLastMatch(insertNewlineAtLastMatch(data.desc, ' by ', true), ',', false);
+    const distanceStr = distance >= 0 ? `<br>Distance: ${distance.toFixed(2)} m`: '';
+
     const popupContent = `
 <strong>${data.name}</strong><br>
 <span>${desc}</span><br>
-<small>${dmm}</small><br>
+<small>${dmm}${distanceStr}</small><br>
 ${moreInfo}
 `;
+    return popupContent;
+}
+
+function prepareInfoContent(data: WaypointDataType, distance: number) {
+    const dmm = position2dmm(data.lat, data.lon);
+    const cacheInfoWithBr = data.cacheInfo ? `<br>\n${data.cacheInfo}<br>\n` : '';
+    const infoContent = `${data.name}<br>\n${dmm}<br>\n${distance >= 0 ? 'Distance: ' + distance.toFixed(2) + '<br>\n' : ''}${data.desc}<br>\n${cacheInfoWithBr}`;
+    return infoContent;
+}
+
+function onWaypointGroupClick(e: L.LeafletMouseEvent): void {
+    const marker = e.propagatedFrom as MarkerType;
+    const data = waypointDataMap[marker.waypointName];
+    const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement;
+
+    const currentLatLng = locationMarker.getLatLng();
+    const isInitialLocation = currentLatLng.lat === 0 && currentLatLng.lng === 0;
+    const distance = isInitialLocation ? -1 : marker.getLatLng().distanceTo(currentLatLng);
+
+    waypointInfo.innerHTML = prepareInfoContent(data, distance);
+
+    const popupContent = preparePopupContent(data, distance);
 
     popup
         .setLatLng(marker.getLatLng())
@@ -351,6 +366,81 @@ async function onGpxFileChange(event: Event): Promise<void> {
 }
 
 
+function locationShowPosition(position: GeolocationPosition) {
+    const latitude = position.coords.latitude;
+    const longitude = position.coords.longitude;
+    //console.log(`DEBUG: Latitude: ${latitude}, Longitude: ${longitude}`);
+    const oldLocation = locationMarker.getLatLng();
+    const isInitialLocation = oldLocation.lat === 0 && oldLocation.lng === 0;
+    locationMarker.setLatLng([latitude, longitude]);
+    const dmm = position2dmm(latitude, longitude);
+    locationMarker.getPopup()?.setContent(`You are here!<br>${dmm}`);
+
+    if (isInitialLocation) {
+        const zoom =  map.getZoom() > 12 ? map.getZoom() : 12;
+        map.setView([latitude, longitude], zoom);
+    }
+
+    if (popup.isOpen()) {
+        const marker = (popup as any)._source as MarkerType; // TTT: fast hack
+        const data = waypointDataMap[marker.waypointName];
+        const currentLatLng = locationMarker.getLatLng();
+        const distance = marker.getLatLng().distanceTo(currentLatLng);
+        const popupContent = preparePopupContent(data, distance);
+        popup.setContent(popupContent);
+    }
+    // TODO: update also waypoint info?
+}
+
+function locationHandleError(error: GeolocationPositionError) {
+    switch (error.code) {
+        case error.PERMISSION_DENIED:
+            console.error("User denied the request for Geolocation.");
+            break;
+        case error.POSITION_UNAVAILABLE:
+            console.error("Location information is unavailable.");
+            break;
+        case error.TIMEOUT:
+            console.error("The request to get user location timed out.");
+            break;
+        default:
+            console.error("An unknown error occurred.");
+            break;
+    }
+}
+
+let locationWatchId: number;
+const locationMarker = L.marker([0, 0]);
+const locationPopup = L.popup();
+
+function onShowLocationInputChange(event: Event): void {
+    if (!("geolocation" in navigator)) {
+        console.warn("Geolocation is not supported by this browser.");
+        return
+    }
+
+    const showLocationInput = event.target as HTMLInputElement;
+    if (showLocationInput.checked) {
+        locationWatchId = navigator.geolocation.watchPosition(
+            (position) => locationShowPosition(position),
+            locationHandleError,
+            { enableHighAccuracy: true }
+        );
+        locationMarker.addTo(map);
+    } else {
+        navigator.geolocation.clearWatch(locationWatchId);
+        locationWatchId = 0;
+        locationMarker.remove();
+        locationMarker.setLatLng([0, 0]);
+        if (popup.isOpen()) { // remove distance from popup...
+            const marker = (popup as any)._source as MarkerType; // TTT: fast hack
+            const data = waypointDataMap[marker.waypointName];
+            const popupContent = preparePopupContent(data, -1);
+            popup.setContent(popupContent);
+        }
+    }
+}
+
 function fnDecodeUri(s: string): string {
     let decoded = "";
 
@@ -411,7 +501,6 @@ function main(): void {
     }).addTo(map);
 
     waypointGroup.on('click', onWaypointGroupClick);
-
     waypointGroup.bindPopup(popup);
 
     const gpxFile = document.getElementById('gpxFile') as HTMLInputElement;
@@ -432,5 +521,11 @@ function main(): void {
         waypointSearch.value = '';
         filterWaypoints(waypointSearch.value);
     });
+
+    const showLocationInput = document.getElementById('showLocationInput') as HTMLInputElement;
+    showLocationInput.addEventListener('change', onShowLocationInputChange);
+
+    locationMarker.bindPopup(locationPopup);
 }
+
 main();
