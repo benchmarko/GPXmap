@@ -9,7 +9,12 @@ This is a Vite-based TypeScript web app that allows users to upload a GPX file a
 - Show current location
 - Modern, user-friendly interface
 
-## Getting Started
+## Links
+
+- [GPXmap on Github](https://benchmarko.github.io/GPXmap/)
+- [GPXmap on Github, starting with gc0001.gpx.js](https://benchmarko.github.io/GPXmap//?file=examples/gc0001.gpx.js)
+
+## Getting Started (local installation)
 
 1. Install dependencies:
 
@@ -47,17 +52,15 @@ This creates `<inputfile>.b64.js` containing the Base64-encoded data and a wrapp
 
 The script output file can be loaded by GPXmap for testing or demo purposee, using the file URL parameter.
 
-## To Do
+## Done
 
 - [x] Add file upload UI
 - [x] Parse GPX and extract waypoints
 - [x] Display waypoints on Leaflet map
 
-//
-// https://medium.com/@robinviktorsson/setting-up-a-modern-typescript-project-with-vite-no-framework-07ea2d3a22b5
+## Other Links
 
-//
-// https://www.gpsvisualizer.com/examples/leaflet_gpx.php
-//barrett_spur.gpx
-// https://www.gpsvisualizer.com/map_input?form=leaflet#highlight=dynamic_data
-//
+- [Setting up a modern typescript project with Vite](https://medium.com/@robinviktorsson/setting-up-a-modern-typescript-project-with-vite-no-framework-07ea2d3a22b5)
+
+- [GPS Visualizer: Generating a map from a GPX file, dynamically; barrett_spur.gpx](https://www.gpsvisualizer.com/examples/leaflet_gpx.php)
+- [GPS Visualizer: Dynamic data](https://www.gpsvisualizer.com/map_input?form=leaflet#highlight=dynamic_data)

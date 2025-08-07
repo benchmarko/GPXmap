@@ -8,22 +8,24 @@ if (process.argv.length < 3) {
   process.exit(1);
 }
 
-const inputFile = process.argv[2];
-const filename = path.basename(inputFile);
-const buffer = fs.readFileSync(inputFile);
-const base64 = buffer.toString('base64');
+for (let i = 2; i < process.argv.length; i++) {
+  const inputFile = process.argv[i];
+  const filename = path.basename(inputFile);
+  const buffer = fs.readFileSync(inputFile);
+  const base64 = buffer.toString('base64');
 
-const prefix = `
-/* globals cpcBasic */
+  const prefix = `
+/* globals GPXmap */
 
 "use strict";
 
 GPXmap.addItem("${filename}.b64", \`\n`;
 
-const suffix = '\`);\n';
+  const suffix = '`);\n';
 
-const outputFile = `${inputFile}.b64.js`;
-fs.writeFileSync(outputFile, prefix + base64 + suffix);
+  const outputFile = `${inputFile}.b64.js`;
+  fs.writeFileSync(outputFile, prefix + base64 + suffix);
+}
 
 // node base64encode.mjs file.zip
 // => will create file.zip.b64.js with the base64-encoded content
