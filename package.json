@@ -1,6 +1,6 @@
 {
   "name": "gpxmap",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,9 @@
     "@types/leaflet": "^1.9.19",
     "@types/leaflet.markercluster": "^1.5.5",
     "typescript": "~5.8.3",
-    "vite": "^7.0.0"
+    "vite": "^7.0.0",
+    "vite-plugin-html": "^3.2.2",
+    "vite-plugin-static-copy": "^3.1.1"
   },
   "dependencies": {
     "leaflet": "^1.9.4",
