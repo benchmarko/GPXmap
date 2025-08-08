@@ -222,16 +222,25 @@ function prepareInfoContent(data: WaypointDataType, distance: number) {
     return infoContent;
 }
 
+function getWaypointInfoHtml(): string {
+    const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement
+    return waypointInfo.innerHTML;
+}
+
+function setWaypointInfoHtml(html: string): void {
+    const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement
+    waypointInfo.innerHTML = html;
+}
+
 function onWaypointGroupClick(e: L.LeafletMouseEvent): void {
     const marker = e.propagatedFrom as MarkerType;
     const data = waypointDataMap[marker.waypointName];
-    const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement;
 
     const currentLatLng = locationMarker.getLatLng();
     const isInitialLocation = currentLatLng.lat === 0 && currentLatLng.lng === 0;
     const distance = isInitialLocation ? -1 : marker.getLatLng().distanceTo(currentLatLng);
 
-    waypointInfo.innerHTML = prepareInfoContent(data, distance);
+    setWaypointInfoHtml(prepareInfoContent(data, distance));
 
     const popupContent = preparePopupContent(data, distance);
 
@@ -285,6 +294,7 @@ function processZipFile(uint8Array: Uint8Array, zipName: string): string[] {
                 }
             } catch (e) {
                 const errorMsg = e instanceof Error ? e.message : String(e);
+                console.error(`File ${name}:`, errorMsg);
                 messages.push(`<span style="color: red">File ${name}: ${errorMsg}</span><br>\n`);
             }
         }
@@ -339,6 +349,9 @@ function parseGpxFile(text: string, name: string): string {
 
 // Handle file upload
 async function onFileInputChange(event: Event): Promise<void> {
+    let infoHtml = '';
+    setWaypointInfoHtml(infoHtml);
+
     if (popup.isOpen()) {
         popup.close();
     }
@@ -353,7 +366,6 @@ async function onFileInputChange(event: Event): Promise<void> {
 
     inputElement.style.color = '';
 
-    let infoHtml = '';
     for (const file of inputElement.files) {
         try {
             if (file.type === 'application/x-zip-compressed' || file.type === 'application/zip') {
@@ -380,12 +392,12 @@ async function onFileInputChange(event: Event): Promise<void> {
             }
         } catch (e) {
             const errorMsg = e instanceof Error ? e.message : String(e);
+            console.error(errorMsg);
             infoHtml += `<span style="color: red">${errorMsg}</span><br>\n`;
             inputElement.style.color = 'red';
         }
     }
-    const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement;
-    waypointInfo.innerHTML = infoHtml;
+    setWaypointInfoHtml(getWaypointInfoHtml() + infoHtml); // add info (in debuggung mode there could be already some output)
 
     const waypointSearch = document.getElementById('waypointSearch') as HTMLInputElement;
     filterWaypoints(waypointSearch.value);
@@ -402,13 +414,17 @@ function locationShowPosition(position: GeolocationPosition) {
     //console.log(`DEBUG: Latitude: ${latitude}, Longitude: ${longitude}`);
     const oldLocation = locationMarker.getLatLng();
     const isInitialLocation = oldLocation.lat === 0 && oldLocation.lng === 0;
-    locationMarker.setLatLng([latitude, longitude]);
     const dmm = position2dmm(latitude, longitude);
+    locationMarker.setLatLng([latitude, longitude]);
     locationMarker.getPopup()?.setContent(`You are here!<br>${dmm}`);
 
     if (isInitialLocation) {
-        const zoom =  map.getZoom() > 12 ? map.getZoom() : 12;
-        map.setView([latitude, longitude], zoom);
+        const keepView = document.getElementById('keepViewInput') as HTMLInputElement;
+        if (!keepView.checked) {
+            const zoom =  map.getZoom() > 12 ? map.getZoom() : 12;
+            map.setView([latitude, longitude], zoom);
+        }
+        locationMarker.addTo(map);
     }
 
     if (popup.isOpen()) {
@@ -456,7 +472,7 @@ function onShowLocationInputChange(event: Event): void {
             locationHandleError,
             { enableHighAccuracy: true }
         );
-        locationMarker.addTo(map);
+        //locationMarker.addTo(map);
     } else {
         navigator.geolocation.clearWatch(locationWatchId);
         locationWatchId = 0;
@@ -510,7 +526,7 @@ async function loadScriptOrStyle(script: HTMLScriptElement | HTMLLinkElement): P
             if (type === "load") {
                 resolve(key);
             } else {
-                reject(key);
+                reject(`Loading failed for ${key}`);
             }
         };
         script.addEventListener("load", onScriptLoad, false);
@@ -538,11 +554,11 @@ function fnDecodeUri(s: string): string {
 
     try {
         decoded = decodeURIComponent(s.replace(/\+/g, " "));
-    } catch (err) {
-        if (err instanceof Error) {
-            err.message += ": " + s;
+    } catch (e) {
+        if (e instanceof Error) {
+            e.message += ": " + s;
         }
-        console.error(err);
+        console.error(e);
     }
     return decoded;
 }
@@ -582,11 +598,34 @@ function parseArgs(args: string[], config: Record<string, ConfigEntryType>): Rec
     return config;
 }
 
+function debugRedirectConsoleToWaypointInfo() {
+    const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement;
+    const colors: Record<string, string> = {
+        error: 'red',
+        warn: 'orange',
+        log: 'gray',
+        debug: 'blue'
+    };
+
+    (['error', 'warn', 'log', 'debug'] as const).forEach(method => {
+        const orig = console[method];
+        console[method] = (...args: any[]) => {
+            orig(...args);
+            waypointInfo.innerHTML += `<span style="color:${colors[method]}">${args.join(' ')}</span><br>`;
+        };
+    });
+    console.log("console messages will be redirected.");
+}
+
 // *** end args
 
 function main(): void {
     const args = parseUri(config);
     parseArgs(args, config);
+
+    if (config.debug >= 10) {
+        debugRedirectConsoleToWaypointInfo();
+    }
 
     map.setView([0, 0], 2);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -632,8 +671,8 @@ function main(): void {
             const key = config.file;
             try {
                 await loadScript(scriptName, key);
-            } catch (error) {
-                console.error("Load Example", scriptName, error);
+            } catch (e) {
+                console.error(e);
             }
         }
     }, 10);
