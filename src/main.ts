@@ -97,17 +97,18 @@ function clearMarkersFromGroup(group: MarkerClusterGroup): void {
 // Define custom icons for cache types
 const iconColors: Record<string, string> = {
     'Geocache|Earthcache': 'brown',
-    'Geocache|Event Cache': 'red',
+    'Geocache|Event Cache': 'fireBrick',
     'Geocache|Letterbox Hybrid': 'yellow',
     'Geocache|Multi-cache': 'orange',
     'Geocache|Traditional Cache': 'green',
-    'Geocache|Unknown (Mystery) Cache': 'blue',
-    'Geocache|Unknown Cache': 'red',
+    'Geocache|Unknown Cache': 'CornFlowerBlue', // Mystery Cache
+    'Geocache|Webcam Cache': 'DarkTurquoise',
     'Waypoint|Parking Area': 'gray',
     'Waypoint|Physical Stage': 'gray',
     'Waypoint|Reference Point': 'gray',
     'Waypoint|Trailhead': 'gray',
-    'Waypoint|Virtual Stage': 'gray',
+    'Waypoint|Virtual Stage': 'lightblue',
+    Location: 'transparent',
     Default: 'gray'
 };
 
@@ -116,12 +117,19 @@ const iconCache: Record<string, L.DivIcon> = {};
 function getIcon(cacheType: string): L.DivIcon {
     const color = iconColors[cacheType] || iconColors.Default;
     if (!iconCache[color]) {
+        const size = cacheType === 'Location' ? 22 : 18; // size of the icon
         iconCache[color] = L.divIcon({
             className: 'custom-cache-icon',
-            html: `<svg width="24" height="24"><circle cx="12" cy="12" r="10" fill="${color}" stroke="black" stroke-width="2"/></svg>`,
-            iconSize: [24, 24],
-            iconAnchor: [12, 24],
-            popupAnchor: [0, -24]
+            // circle with x in the middle
+            //html: `<svg width="${size}" height="${size}" stroke="black" stroke-width="1"><circle cx="${size / 2}" cy="${size / 2}" r="${size / 2 - 1}" fill="${color}" /><line x1="6" y1="6" x2="16" y2="16" /><line x1="16" y1="6" x2="6" y2="16" /></svg>`,
+            html: `<svg width="${size}" height="${size}" stroke="black" stroke-width="1">
+            <circle cx="${size / 2}" cy="${size / 2}" r="${size / 2 - 1}" fill="${color}" />
+            <line x1="${size * 0.27}" y1="${size * 0.27}" x2="${size * 0.73}" y2="${size * 0.73}" />
+            <line x1="${size * 0.73}" y1="${size * 0.27}" x2="${size * 0.27}" y2="${size * 0.73}" />
+            </svg>`,
+            iconSize: [size, size],
+            iconAnchor: [size / 2, size],
+            popupAnchor: [0, -size]
         });
     }
     return iconCache[color];
@@ -191,7 +199,35 @@ function position2dmm(lat: number, lon: number): string {
     return latNS + " " + String(latDeg).padStart(2, '0') + "° " + latMin.toFixed(3).padStart(6, '0') + " " + lonEW + " " + String(lonDeg).padStart(3, '0') + "° " + lonMin.toFixed(3).padStart(6, '0');
 }
 
-function preparePopupContent(data: WaypointDataType, distance: number) {
+const directions = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
+
+function getDirection(bearing: number): string {
+    return directions[Math.round(bearing / (360 / directions.length)) % directions.length];
+}
+
+function formatDistance(distance: number) {
+    if (distance > 1000) {
+        return (distance / 1000).toFixed(3) + ' km';
+    }
+    return distance.toFixed(2) + ' m';
+}
+
+function getBearing(from: L.LatLng, to: L.LatLng): number {
+    const toRad = (deg: number) => deg * Math.PI / 180;
+    const toDeg = (rad: number) => rad * 180 / Math.PI;
+
+    const lat1 = toRad(from.lat);
+    const lat2 = toRad(to.lat);
+    const dLon = toRad(to.lng - from.lng);
+
+    const y = Math.sin(dLon) * Math.cos(lat2);
+    const x = Math.cos(lat1) * Math.sin(lat2) -
+              Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+    const brng = Math.atan2(y, x);
+    return (toDeg(brng) + 360) % 360; // Normalize to 0-360
+}
+
+function preparePopupContent(data: WaypointDataType, distance: number, bearing: number): string {
     const moreInfo = data.cacheInfo ? `
 <details style="margin-top:4px;">
     <summary>More info</summary>
@@ -204,7 +240,7 @@ function preparePopupContent(data: WaypointDataType, distance: number) {
 
     const dmm = position2dmm(data.lat, data.lon);
     const desc = insertNewlineAtLastMatch(insertNewlineAtLastMatch(data.desc, ' by ', true), ',', false);
-    const distanceStr = distance >= 0 ? `<br>Distance: ${distance.toFixed(2)} m`: '';
+    const distanceStr = distance >= 0 ? `<br>Distance: ${formatDistance(distance)} ${getDirection(bearing)} (${bearing.toFixed(0)}°)`: '';
 
     const popupContent = `
 <strong>${data.name}</strong><br>
@@ -215,10 +251,11 @@ ${moreInfo}
     return popupContent;
 }
 
-function prepareInfoContent(data: WaypointDataType, distance: number) {
+function prepareInfoContent(data: WaypointDataType, distance: number, bearing: number): string {
     const dmm = position2dmm(data.lat, data.lon);
     const cacheInfoWithBr = data.cacheInfo ? `<br>\n${data.cacheInfo}<br>\n` : '';
-    const infoContent = `${data.name}<br>\n${dmm}<br>\n${distance >= 0 ? 'Distance: ' + distance.toFixed(2) + '<br>\n' : ''}${data.desc}<br>\n${cacheInfoWithBr}`;
+    const distanceStr = distance >= 0 ? `Distance: ${formatDistance(distance)} ${getDirection(bearing)} (${bearing.toFixed(0)}°)<br>\n` : ''
+    const infoContent = `${data.name}<br>\n${dmm}<br>\n${distanceStr}${data.desc}<br>\n${cacheInfoWithBr}`;
     return infoContent;
 }
 
@@ -239,10 +276,11 @@ function onWaypointGroupClick(e: L.LeafletMouseEvent): void {
     const currentLatLng = locationMarker.getLatLng();
     const isInitialLocation = currentLatLng.lat === 0 && currentLatLng.lng === 0;
     const distance = isInitialLocation ? -1 : marker.getLatLng().distanceTo(currentLatLng);
+    const bearing = getBearing(currentLatLng, marker.getLatLng());
 
-    setWaypointInfoHtml(prepareInfoContent(data, distance));
+    setWaypointInfoHtml(prepareInfoContent(data, distance, bearing));
 
-    const popupContent = preparePopupContent(data, distance);
+    const popupContent = preparePopupContent(data, distance, bearing);
 
     popup
         .setLatLng(marker.getLatLng())
@@ -432,7 +470,8 @@ function locationShowPosition(position: GeolocationPosition) {
         const data = waypointDataMap[marker.waypointName];
         const currentLatLng = locationMarker.getLatLng();
         const distance = marker.getLatLng().distanceTo(currentLatLng);
-        const popupContent = preparePopupContent(data, distance);
+        const bearing = getBearing(currentLatLng, marker.getLatLng());
+        const popupContent = preparePopupContent(data, distance, bearing);
         popup.setContent(popupContent);
     }
     // TODO: update also waypoint info?
@@ -456,7 +495,7 @@ function locationHandleError(error: GeolocationPositionError) {
 }
 
 let locationWatchId: number;
-const locationMarker = L.marker([0, 0]);
+const locationMarker = L.marker([0, 0], { icon: getIcon('Location') });
 const locationPopup = L.popup();
 
 function onShowLocationInputChange(event: Event): void {
@@ -472,7 +511,6 @@ function onShowLocationInputChange(event: Event): void {
             locationHandleError,
             { enableHighAccuracy: true }
         );
-        //locationMarker.addTo(map);
     } else {
         navigator.geolocation.clearWatch(locationWatchId);
         locationWatchId = 0;
@@ -481,7 +519,7 @@ function onShowLocationInputChange(event: Event): void {
         if (popup.isOpen()) { // remove distance from popup...
             const marker = (popup as any)._source as MarkerType; // TTT: fast hack
             const data = waypointDataMap[marker.waypointName];
-            const popupContent = preparePopupContent(data, -1);
+            const popupContent = preparePopupContent(data, -1, -1); // no distance and bearing
             popup.setContent(popupContent);
         }
     }
