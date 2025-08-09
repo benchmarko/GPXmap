@@ -70,6 +70,11 @@ function debounce(fn: (...args: any[]) => void, delay: number) {
     };
 }
 
+function setButtonDisabled(id: string, disabled: boolean) {
+    const element = window.document.getElementById(id) as HTMLButtonElement;
+    element.disabled = disabled;
+}
+
 // Get a marker from the pool or create a new one
 function getPooledMarker(lat: number, lon: number, icon: L.DivIcon, name: string): MarkerType {
     let marker: MarkerType;
@@ -251,26 +256,71 @@ ${moreInfo}
     return popupContent;
 }
 
+function getSolverCodeFromInfo(cacheInfo: string) {
+    const solverData = cacheInfo.match(/<details><summary>Solver<\/summary><div class="gc_solver">(.+?)<\/div><\/details>/s);
+    let solverCode = '';
+    let index = -1;
+    if (solverData && solverData[1]) {
+        solverCode = solverData[1].replace(/<br\/?>\n/g, '\n').trim();
+        index = solverData.index || -1;
+    }
+    return { solverCode, index };
+}
+
+function getSolverCodeFromLocalStorage(key: string) {
+    const solverCode = window.localStorage.getItem(key);
+    return solverCode;
+}
+
+function putSolverCodeIntoLocalStorage(key: string, solverCode: string) {
+    window.localStorage.setItem(key, solverCode);
+}
+
+function removeKeyFromLocalStorage(key: string) {
+    window.localStorage.removeItem(key);
+}
+
+function prepareSolverCodeForInfo(solverCode: string) {
+    solverCode = solverCode.replace(/\n/g, '<br>\n');
+    return `<details><summary>Solver</summary><div class="gc_solver">${solverCode}<br>\n</div></details>\n`;
+}
+
 function prepareInfoContent(data: WaypointDataType, distance: number, bearing: number): string {
+    let cacheInfo = data.cacheInfo || '';
+
+    const localSolverCode = getSolverCodeFromLocalStorage(data.name);
+    if (localSolverCode) {
+        const { solverCode, index } = getSolverCodeFromInfo(cacheInfo);
+        if (index >= 0) {
+            cacheInfo = cacheInfo.substring(0, index); // strip solverCode
+        }
+        cacheInfo += prepareSolverCodeForInfo(localSolverCode); // add new solverCode
+        if (config.debug > 3) {
+            console.debug("DEBUG: oldSolverCode=", solverCode); //TTT
+        }
+    }
+    cacheInfo = `<br>\n${cacheInfo}<br>\n`
+
     const dmm = position2dmm(data.lat, data.lon);
-    const cacheInfoWithBr = data.cacheInfo ? `<br>\n${data.cacheInfo}<br>\n` : '';
     const distanceStr = distance >= 0 ? `Distance: ${formatDistance(distance)} ${getDirection(bearing)} (${bearing.toFixed(0)}°)<br>\n` : ''
-    const infoContent = `${data.name}<br>\n${dmm}<br>\n${distanceStr}${data.desc}<br>\n${cacheInfoWithBr}`;
+    const infoContent = `${data.name}<br>\n${dmm}<br>\n${distanceStr}${data.desc}<br>\n${cacheInfo}`;
     return infoContent;
 }
 
 function getWaypointInfoHtml(): string {
-    const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement
+    const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement;
     return waypointInfo.innerHTML;
 }
 
 function setWaypointInfoHtml(html: string): void {
-    const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement
+    const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement;
     waypointInfo.innerHTML = html;
 }
 
-function onWaypointGroupClick(e: L.LeafletMouseEvent): void {
-    const marker = e.propagatedFrom as MarkerType;
+let selectedMarker: MarkerType | undefined = undefined;
+
+function selectMarker(marker: MarkerType): void {
+    selectedMarker = marker;
     const data = waypointDataMap[marker.waypointName];
 
     const currentLatLng = locationMarker.getLatLng();
@@ -280,17 +330,27 @@ function onWaypointGroupClick(e: L.LeafletMouseEvent): void {
 
     setWaypointInfoHtml(prepareInfoContent(data, distance, bearing));
 
+    setButtonDisabled('editButton', false);
+    setButtonDisabled('saveButton', true); // TODO: do we need to save something?
+    setButtonDisabled('cancelButton', true);
+
     const popupContent = preparePopupContent(data, distance, bearing);
 
     popup
         .setLatLng(marker.getLatLng())
         .setContent(popupContent);
 
-    const solverData = data.cacheInfo.match(/<div class="gc_solver">(.+?)<\/div>/s);
-    if (solverData && solverData[1]) {
-        const solverCode = solverData[1].replace(/<br\/?>\n/g, '\n').trim();
-        console.debug("DEBUG: solverCode=", solverCode);
+    /*
+    const infoSolverCode = getSolverCodeFromInfo(data.cacheInfo);
+    if (infoSolverCode) {
+        console.debug("DEBUG: solverCode=", infoSolverCode);
     }
+    */
+}
+
+function onWaypointGroupClick(e: L.LeafletMouseEvent): void {
+    const marker = e.propagatedFrom as MarkerType;
+    selectMarker(marker);
 }
 
 function processZipFile(uint8Array: Uint8Array, zipName: string): string[] {
@@ -390,6 +450,10 @@ async function onFileInputChange(event: Event): Promise<void> {
     let infoHtml = '';
     setWaypointInfoHtml(infoHtml);
 
+    setButtonDisabled('editButton', true);
+    // TODO: save if something was changed?
+    setButtonDisabled('saveButton', true);
+
     if (popup.isOpen()) {
         popup.close();
     }
@@ -443,6 +507,62 @@ async function onFileInputChange(event: Event): Promise<void> {
     const endTime = Date.now();
     console.log(`Processed in ${endTime - startTime} ms`);
 }
+
+function onEditButtonClick(_event: Event) {
+    //const editButton = event.target as HTMLButtonElement;
+    if (!selectedMarker) {
+        console.error("No marker selected.");
+        return;
+    }
+    const name = selectedMarker.waypointName;
+    let info = getSolverCodeFromLocalStorage(name);
+    if (!info) {
+        const data = waypointDataMap[name];
+        const { solverCode } = getSolverCodeFromInfo(data.cacheInfo);
+        info = solverCode;
+    }
+    const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement;
+    waypointInfo.innerText = info;
+    waypointInfo.setAttribute('contenteditable', "true"); //TTT or "plaintext-only"?
+    setButtonDisabled('editButton', true);
+    setButtonDisabled('saveButton', false);
+    setButtonDisabled('cancelButton', false);
+    // no cancel?
+}
+
+function onSaveButtonClick(_event: Event) {
+    if (!selectedMarker) {
+        console.error("No marker selected.");
+        return;
+    }
+    const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement;
+    waypointInfo.setAttribute('contenteditable', "false");
+
+    const solverCode = waypointInfo.innerText.trim(); // to be sure, we want text only
+    const key = selectedMarker.waypointName;
+    if (solverCode) {
+        putSolverCodeIntoLocalStorage(key, solverCode);
+    } else {
+        removeKeyFromLocalStorage(key);
+    }
+    selectMarker(selectedMarker);
+    setButtonDisabled('editButton', false);
+    setButtonDisabled('cancelButton', true);
+}
+
+function onCancelButtonClick(_event: Event) {
+    if (!selectedMarker) {
+        console.error("No marker selected.");
+        return;
+    }
+    const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement;
+    waypointInfo.setAttribute('contenteditable', "false");
+    selectMarker(selectedMarker);
+    setButtonDisabled('editButton', false);
+    //setButtonDisabled('saveButton', true);
+    setButtonDisabled('cancelButton', true);
+}
+
 
 // *** start location service
 
@@ -702,6 +822,15 @@ function main(): void {
             addItem(key, input);
         }
     };
+
+    const editButton = document.getElementById('editButton') as HTMLButtonElement;
+    editButton.addEventListener('click', onEditButtonClick);
+    
+    const saveButton = document.getElementById('saveButton') as HTMLButtonElement;
+    saveButton.addEventListener('click', onSaveButtonClick);
+
+    const cancelButton = document.getElementById('cancelButton') as HTMLButtonElement;
+    cancelButton.addEventListener('click', onCancelButtonClick);
 
     asyncDelay(async () => {
         if (config.file) {
