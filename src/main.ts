@@ -1,7 +1,10 @@
 import './style.css';
 import L from 'leaflet';
 import 'leaflet.markercluster';
-import type { MarkerClusterGroup } from 'leaflet';
+import type { FeatureGroup, MarkerClusterGroup } from 'leaflet';
+
+import LatLng from "./LatLng";
+import ScriptParser from './ScriptParser';
 import { ZipFile } from "./ZipFile";
 
 declare global {
@@ -48,6 +51,9 @@ const map = L.map('map');
 const waypointGroup = L.markerClusterGroup();
 const popup = L.popup();
 
+const solverGroup = L.featureGroup();
+const solverPopup = L.popup();
+
 // Marker pool for reuse
 const markerPool: MarkerType[] = [];
 
@@ -90,7 +96,7 @@ function getPooledMarker(lat: number, lon: number, icon: L.DivIcon, name: string
 }
 
 // When clearing markers, return them to the pool
-function clearMarkersFromGroup(group: MarkerClusterGroup): void {
+function clearMarkersFromGroup(group: MarkerClusterGroup | FeatureGroup): void {
     group.eachLayer(layer => {
         if (layer instanceof L.Marker) {
             markerPool.push(layer as MarkerType);
@@ -114,6 +120,7 @@ const iconColors: Record<string, string> = {
     'Waypoint|Trailhead': 'gray',
     'Waypoint|Virtual Stage': 'lightblue',
     Location: 'transparent',
+    Solver: 'transparent',
     Default: 'gray'
 };
 
@@ -123,7 +130,7 @@ function getIcon(cacheType: string): L.DivIcon {
     const color = iconColors[cacheType] || iconColors.Default;
     if (!iconCache[color]) {
         const size = cacheType === 'Location' ? 22 : 18; // size of the icon
-        iconCache[color] = L.divIcon({
+        iconCache[cacheType] = L.divIcon({
             className: 'custom-cache-icon',
             // circle with x in the middle
             //html: `<svg width="${size}" height="${size}" stroke="black" stroke-width="1"><circle cx="${size / 2}" cy="${size / 2}" r="${size / 2 - 1}" fill="${color}" /><line x1="6" y1="6" x2="16" y2="16" /><line x1="16" y1="6" x2="6" y2="16" /></svg>`,
@@ -133,11 +140,11 @@ function getIcon(cacheType: string): L.DivIcon {
             <line x1="${size * 0.73}" y1="${size * 0.27}" x2="${size * 0.27}" y2="${size * 0.73}" />
             </svg>`,
             iconSize: [size, size],
-            iconAnchor: [size / 2, size],
+            iconAnchor: [size / 2, size / 2],
             popupAnchor: [0, -size]
         });
     }
-    return iconCache[color];
+    return iconCache[cacheType];
 }
 
 // Helper to render (filtered) markers
@@ -156,6 +163,56 @@ function renderMarkers(markersData: WaypointDataType[], keepView: boolean): void
         if (!keepView) {
             map.fitBounds(waypointGroup.getBounds().pad(0.5));
         }
+    }
+}
+
+const polylineGroup = L.featureGroup(); // featureGroup for polyline
+
+function privSetPolyline(path: L.LatLng[]) {
+    const aLayers = polylineGroup.getLayers();
+
+    if (aLayers.length) {
+        const oPolyline = aLayers[0] as L.Polyline;
+        oPolyline.setLatLngs(path);
+    } else {
+        const mPolylineOptions = {
+            color: "blue", // "red", // default: #3388FF
+            weight: 2, // default: 3
+            opacity: 0.7 // default: 1
+        };
+        const oPolyline = new L.Polyline(path, mPolylineOptions);
+        oPolyline.addTo(polylineGroup);
+    }
+}
+
+function setPolyline(solverMarkersData: WaypointDataType[]) { // for update
+    polylineGroup.clearLayers();
+    const aPath = [];
+    for (let i = 0; i < solverMarkersData.length; i += 1) {
+        const oItem = solverMarkersData[i];
+        const oPosition = new L.LatLng(oItem.lat, oItem.lon); //oItem.position.clone();
+        aPath.push(oPosition);
+    }
+
+    privSetPolyline(aPath);
+}
+
+const solverDataMap: WaypointDataMapType = {};
+
+function renderSolverMarkers(solverMarkersData: WaypointDataType[]): void {
+    if (map.hasLayer(solverGroup)) {
+        clearMarkersFromGroup(solverGroup);
+        map.removeLayer(solverGroup);
+    }
+    deleteAllItems(solverDataMap);
+
+    if (solverMarkersData.length > 0) {
+        solverMarkersData.forEach(data => {
+            const marker = getPooledMarker(data.lat, data.lon, getIcon(data.type), data.name);
+            solverGroup.addLayer(marker);
+            solverDataMap[data.name] = data;
+        });
+        solverGroup.addTo(map);
     }
 }
 
@@ -227,7 +284,7 @@ function getBearing(from: L.LatLng, to: L.LatLng): number {
 
     const y = Math.sin(dLon) * Math.cos(lat2);
     const x = Math.cos(lat1) * Math.sin(lat2) -
-              Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+        Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
     const brng = Math.atan2(y, x);
     return (toDeg(brng) + 360) % 360; // Normalize to 0-360
 }
@@ -245,7 +302,7 @@ function preparePopupContent(data: WaypointDataType, distance: number, bearing: 
 
     const dmm = position2dmm(data.lat, data.lon);
     const desc = insertNewlineAtLastMatch(insertNewlineAtLastMatch(data.desc, ' by ', true), ',', false);
-    const distanceStr = distance >= 0 ? `<br>Distance: ${formatDistance(distance)} ${getDirection(bearing)} (${bearing.toFixed(0)}°)`: '';
+    const distanceStr = distance >= 0 ? `<br>Distance: ${formatDistance(distance)} ${getDirection(bearing)} (${bearing.toFixed(0)}°)` : '';
 
     const popupContent = `
 <strong>${data.name}</strong><br>
@@ -270,6 +327,16 @@ function getSolverCodeFromInfo(cacheInfo: string) {
 function getSolverCodeFromLocalStorage(key: string) {
     const solverCode = window.localStorage.getItem(key);
     return solverCode;
+}
+
+function getSolverCode(key: string) {
+    let code = getSolverCodeFromLocalStorage(key);
+    if (!code) {
+        const data = waypointDataMap[key];
+        const { solverCode } = getSolverCodeFromInfo(data.cacheInfo);
+        code = solverCode;
+    }
+    return code;
 }
 
 function putSolverCodeIntoLocalStorage(key: string, solverCode: string) {
@@ -317,6 +384,41 @@ function setWaypointInfoHtml(html: string): void {
     waypointInfo.innerHTML = html;
 }
 
+function parseSolverCode(input: string, variables: Record<string, string | number>) {
+    if (input.includes('\u2013')) {
+        console.warn("strange '-' found: '\u2013'. Replacing.");
+        //input = input.replaceAll('\u2013', '-');
+    }
+    const output = new ScriptParser().calculate(input, variables);
+    if (config.debug > 1) {
+        console.debug("DEBUG: parseSolverCode: ", output, variables);
+    }
+    if (!output.error) {
+        return output.text;
+    }
+    const oError = output.error;
+    const iEndPos = oError.pos + ((oError.value !== undefined) ? String(oError.value).length : 0);
+    const errorMsg = oError.message + ": '" + oError.value + "' (pos " + oError.pos + "-" + iEndPos + ")";
+    console.error(errorMsg);
+    return `<span style="color: red">${errorMsg}</span><br>\n`;
+}
+
+function prepareSolverMarkersData(solverPoints: [string, string | number][]) {
+    const markersData = solverPoints.map((entry) => {
+        const [key, value] = entry;
+        const latLon = new LatLng().parse(String(value));
+        return {
+            name: key,
+            lat: latLon.getLat(),
+            lon: latLon.getLng(),
+            type: "Solver",
+            desc: "",
+            cacheInfo: ""
+        }
+    });
+    return markersData;
+}
+
 let selectedMarker: MarkerType | undefined = undefined;
 
 function selectMarker(marker: MarkerType): void {
@@ -328,7 +430,7 @@ function selectMarker(marker: MarkerType): void {
     const distance = isInitialLocation ? -1 : marker.getLatLng().distanceTo(currentLatLng);
     const bearing = getBearing(currentLatLng, marker.getLatLng());
 
-    setWaypointInfoHtml(prepareInfoContent(data, distance, bearing));
+    let infoContent = prepareInfoContent(data, distance, bearing);
 
     setButtonDisabled('editButton', false);
     setButtonDisabled('saveButton', true); // TODO: do we need to save something?
@@ -340,17 +442,60 @@ function selectMarker(marker: MarkerType): void {
         .setLatLng(marker.getLatLng())
         .setContent(popupContent);
 
-    /*
-    const infoSolverCode = getSolverCodeFromInfo(data.cacheInfo);
-    if (infoSolverCode) {
-        console.debug("DEBUG: solverCode=", infoSolverCode);
+    const solverCode = getSolverCode(marker.waypointName);
+    if (solverCode) {
+        const variables: Record<string, string | number> = {};
+        const text = parseSolverCode(solverCode, variables);
+        infoContent += `<br>Solver Result:<br>`;
+        if (text) {
+            infoContent += text.replace(/\n/g, '<br>\n');;
+        }
+        //infoContent += Object.entries(variables).map(([key, value]) => `${key}: ${value}` ).join("<br>\n");
+        const solverPoints = Object.entries(variables).filter(([key, _value]) => key.startsWith("$"));
+        //const solverMarkersData = solverMarkersDataList;
+        //solverMarkersDataList.length = 0;
+        const solverMarkersData = prepareSolverMarkersData(solverPoints); //TTT
+        //solverMarkersDataList.push(...solverMarkersData);
+        renderSolverMarkers(solverMarkersData);
+        setPolyline(solverMarkersData);
     }
-    */
+
+    setWaypointInfoHtml(infoContent);
+}
+
+function selectSolverMarker(marker: MarkerType): void {
+    selectedMarker = marker;
+    const data = solverDataMap[marker.waypointName];
+
+    const currentLatLng = locationMarker.getLatLng();
+    const isInitialLocation = currentLatLng.lat === 0 && currentLatLng.lng === 0;
+    const distance = isInitialLocation ? -1 : marker.getLatLng().distanceTo(currentLatLng);
+    const bearing = getBearing(currentLatLng, marker.getLatLng());
+
+    //let infoContent = prepareInfoContent(data, distance, bearing);
+
+    const popupContent = preparePopupContent(data, distance, bearing);
+
+    //console.log("DDD:", popupContent);
+
+    solverPopup
+        .setLatLng(marker.getLatLng())
+        .setContent(popupContent);
+
+
+    //setWaypointInfoHtml(infoContent);
 }
 
 function onWaypointGroupClick(e: L.LeafletMouseEvent): void {
+    solverGroup.clearLayers();
+    polylineGroup.clearLayers();
     const marker = e.propagatedFrom as MarkerType;
     selectMarker(marker);
+}
+
+function onSolverGroupClick(e: L.LeafletMouseEvent): void {
+    const marker = e.propagatedFrom as MarkerType;
+    selectSolverMarker(marker);
 }
 
 function processZipFile(uint8Array: Uint8Array, zipName: string): string[] {
@@ -425,7 +570,7 @@ function parseGpxFile(text: string, name: string): string {
 
         const cacheElem = wpt.getElementsByTagName('groundspeak:cache')[0];
         let cacheInfo = '';
-         if (cacheElem) {
+        if (cacheElem) {
             const archived = (cacheElem.getAttribute('archived') || '').toLowerCase() === 'true';
             const available = (cacheElem.getAttribute('available') || '').toLowerCase() === 'true';
             const cacheName = cacheElem.getElementsByTagName('groundspeak:name')[0]?.textContent || '';
@@ -514,15 +659,10 @@ function onEditButtonClick(_event: Event) {
         console.error("No marker selected.");
         return;
     }
-    const name = selectedMarker.waypointName;
-    let info = getSolverCodeFromLocalStorage(name);
-    if (!info) {
-        const data = waypointDataMap[name];
-        const { solverCode } = getSolverCodeFromInfo(data.cacheInfo);
-        info = solverCode;
-    }
+    const key = selectedMarker.waypointName;
+    const code = getSolverCode(key);
     const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement;
-    waypointInfo.innerText = info;
+    waypointInfo.innerText = code;
     waypointInfo.setAttribute('contenteditable', "true"); //TTT or "plaintext-only"?
     setButtonDisabled('editButton', true);
     setButtonDisabled('saveButton', false);
@@ -579,7 +719,7 @@ function locationShowPosition(position: GeolocationPosition) {
     if (isInitialLocation) {
         const keepView = document.getElementById('keepViewInput') as HTMLInputElement;
         if (!keepView.checked) {
-            const zoom =  map.getZoom() > 12 ? map.getZoom() : 12;
+            const zoom = map.getZoom() > 12 ? map.getZoom() : 12;
             map.setView([latitude, longitude], zoom);
         }
         locationMarker.addTo(map);
@@ -793,6 +933,9 @@ function main(): void {
     waypointGroup.on('click', onWaypointGroupClick);
     waypointGroup.bindPopup(popup);
 
+    solverGroup.on('click', onSolverGroupClick);
+    solverGroup.bindPopup(solverPopup);
+
     const fileInput = document.getElementById('fileInput') as HTMLInputElement;
     fileInput.addEventListener('change', onFileInputChange);
 
@@ -825,12 +968,14 @@ function main(): void {
 
     const editButton = document.getElementById('editButton') as HTMLButtonElement;
     editButton.addEventListener('click', onEditButtonClick);
-    
+
     const saveButton = document.getElementById('saveButton') as HTMLButtonElement;
     saveButton.addEventListener('click', onSaveButtonClick);
 
     const cancelButton = document.getElementById('cancelButton') as HTMLButtonElement;
     cancelButton.addEventListener('click', onCancelButtonClick);
+
+    polylineGroup.addTo(map);
 
     asyncDelay(async () => {
         if (config.file) {
