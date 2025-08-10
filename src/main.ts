@@ -389,18 +389,30 @@ function parseSolverCode(input: string, variables: Record<string, string | numbe
         console.warn("strange '-' found: '\u2013'. Replacing.");
         //input = input.replaceAll('\u2013', '-');
     }
-    const output = new ScriptParser().calculate(input, variables);
-    if (config.debug > 1) {
-        console.debug("DEBUG: parseSolverCode: ", output, variables);
+
+    try {
+        const output = new ScriptParser().calculate(input, variables);
+        if (config.debug > 1) {
+            console.debug("DEBUG: parseSolverCode: ", output, variables);
+        }
+        return String(output);
+    } catch (e) {
+        //const errorMsg = e instanceof Error ? String(e) : `Unknown error: ${e}`;
+        const errorMsg = String(e);
+        console.error(errorMsg);
+        return `<span style="color: red">Error: ${errorMsg}</span><br>\n`;
     }
+
+    /*
     if (!output.error) {
         return output.text;
     }
     const oError = output.error;
     const iEndPos = oError.pos + ((oError.value !== undefined) ? String(oError.value).length : 0);
     const errorMsg = oError.message + ": '" + oError.value + "' (pos " + oError.pos + "-" + iEndPos + ")";
-    console.error(errorMsg);
-    return `<span style="color: red">${errorMsg}</span><br>\n`;
+    */
+    //console.error(errorMsg);
+    //return `<span style="color: red">${errorMsg}</span><br>\n`;
 }
 
 function prepareSolverMarkersData(solverPoints: [string, string | number][]) {

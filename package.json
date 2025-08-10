@@ -1,16 +1,20 @@
 {
   "name": "gpxmap",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "deploy": "gh-pages -d dist"
+    "deploy": "gh-pages -d dist",
+    "test": "jest"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/leaflet": "^1.9.19",
     "@types/leaflet.markercluster": "^1.5.5",
+    "jest": "^30.0.5",
+    "ts-jest": "^29.4.1",
     "typescript": "~5.8.3",
     "vite": "^7.0.0",
     "vite-plugin-html": "^3.2.2",
