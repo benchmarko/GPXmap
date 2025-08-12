@@ -9,13 +9,10 @@ type Token = {
 };
 
 type ParseNode = Token & {
-	//type: string;
-	//value?: string | number | ParseNode;
 	left?: ParseNode;
 	right?: ParseNode;
 	args?: ParseNode[];
 	name?: string;
-	//pos?: number;
 };
 
 type ParseFunction = (node: ParseNode) => ParseNode;
@@ -24,14 +21,47 @@ interface SymbolType {
 	nud?: ParseFunction // null denotative function
 	lbp?: number // left binding power
 	led?: ParseFunction // left denotative function
-	//std?: ParseFunction // statement function
 }
 
-type Variables = Record<string, string | number>;
+export type VariableAccessType = { //Record<string, string | number>;
+	vars: Record<string, string | number>,
+	get: (name: string) => string | number,
+	set: (name: string, value: string | number) => void
+}
+
 type Functions = Record<string, (...args: any[]) => any>;
+
+const functionList = "_concat abs acos asin atan bearing cb center cls cos count cp ct d2r deg distance encode format goto ic instr int lc len mid mod pc project r2d rad replace reverse rot13 show skeleton sin sqrt sval tan uc val".split(" ");
+const commandList = "endif if stop then".split(" ");
+const keywordsMap = [...functionList, ...commandList].reduce((acc, keyword) => {
+	acc[keyword] = true;
+	return acc;
+}, {} as Record<string, boolean>);
 
 const toRadians = (deg: number) => deg * Math.PI / 180;
 const toDegrees = (rad: number) => rad * 180 / Math.PI;
+
+				// needed for sval
+	const zFormat = (s: string, length: number) => {
+				s = String(s);
+				for (let i = s.length; i < length; i += 1) {
+					s = "0" + s;
+				}
+				return s;
+			};
+
+	// needed for formatter
+	const numFormat = (s: string, format: string) => {
+				if (format.indexOf(".") < 0) {
+					s = Number(s).toFixed(0);
+					s = zFormat(s, format.length);
+				} else { // assume 000.00
+					const aFormat = format.split(".", 2);
+					s = Number(s).toFixed(aFormat[1].length);
+					s = zFormat(s, format.length);
+				}
+				return s;
+			};
 
 const regExpEscape = (s: string) => {
 	return s.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&"); // (github.com/benjamingr/RegExp.escape), one / removed
@@ -52,7 +82,6 @@ export default class ScriptParser {
 			this.value = value;
 			this.pos = pos;
 			this.name = "ScriptParserError";
-			//this.toString = () => `Error: ${this.message}: ${this.value} (pos: ${this.pos})`; 
 		}
 	};
 
@@ -144,7 +173,11 @@ export default class ScriptParser {
 				sChar = advance();
 			} else if (isIdentifier(sChar)) {
 				sToken = advanceWhile(isIdentifier);
-				addToken("identifier", sToken, iStartPos);
+				if (keywordsMap[sToken.toLowerCase()]) {
+					addToken(sToken.toLowerCase(), 0, iStartPos);
+				} else {
+					addToken("identifier", sToken, iStartPos);
+				}
 			} else if (isFormatter(sChar)) {
 				sChar = "";
 				sToken = advanceWhile(isNotFormatter);
@@ -191,13 +224,6 @@ export default class ScriptParser {
 				throw new ScriptParser.ErrorObject("No token", "", 0);
 			}
 			const parseToken = t as ParseNode; // we get a lex token and reuse it as parseTree token
-			/*
-			const oSym = Object.create(oSymbols[oToken.type]);
-			oSym.type = oToken.type;
-			oSym.value = oToken.value;
-			oSym.pos = oToken.pos;
-			return oSym;
-			*/
 			return parseToken;
 		};
 
@@ -220,7 +246,7 @@ export default class ScriptParser {
 				if (t.type === "(end)") {
 					throw new ScriptParser.ErrorObject("Unexpected end of file", "", t.pos);
 				} else {
-					throw new ScriptParser.ErrorObject("Unexpected token", t.type, t.pos);
+					throw new ScriptParser.ErrorObject("Unexpected token (nud)", t.type, t.pos);
 				}
 			}
 			let left = s.nud(t);
@@ -271,9 +297,15 @@ export default class ScriptParser {
 		symbol("number", fnNode);
 		symbol("string", fnNode);
 		symbol("identifier", (node: ParseNode) => {
+			return node;
+		});
+
+
+		function createFunctionCall(node: ParseNode) {
 			if (token().type === "(") {
 				const parseIndex = index;
 				const args: ParseNode[] = [];
+
 				if (tokens[index + 1].type === ")") {
 					advance();
 				} else {
@@ -282,20 +314,32 @@ export default class ScriptParser {
 						args.push(expression(2));
 					} while (token().type === ",");
 					if (token().type !== ")") {
-						throw new ScriptParser.ErrorObject("Expected closing parenthesis for function", String(tokens[parseIndex - 1].value), tokens[parseIndex].pos);
+						throw new ScriptParser.ErrorObject("Expected closing parenthesis for function", String(tokens[parseIndex - 1].type), tokens[parseIndex].pos);
 					}
 				}
 				advance();
 				return {
-					type: "call",
+					type: node.type,
 					args: args,
-					name: node.value,
+					name: "",
 					value: "",
 					pos: tokens[parseIndex - 1].pos
 				};
 			}
 			return node;
-		});
+		}
+
+		function generateKeywordSymbols() {
+			for (const key of functionList) {
+				symbol(key, createFunctionCall);
+			}
+			for (const key of commandList) {
+				symbol(key, createFunctionCall);
+			}
+		}
+
+		generateKeywordSymbols();
+
 
 		symbol("(", () => {
 			const parseIndex = index;
@@ -326,15 +370,50 @@ export default class ScriptParser {
 					throw new ScriptParser.ErrorObject("Expected closing bracket", "]", tokens[parseIndex].pos);
 				}
 				node = {
-					type: "call",
+					type: "_concat",
 					args: args,
-					name: "concat",
+					name: "", //"concat",
 					value: "",
 					pos: tokens[parseIndex - 1].pos
 				};
 			}
 			advance();
 			return node;
+		});
+
+		// Add a flag to track if we're parsing an IF condition
+		let isInIfCondition = false;
+
+		symbol("if", () => {
+			isInIfCondition = true;
+			const condition = expression(0);
+			isInIfCondition = false;
+
+			if (token().type !== "then") {
+				throw new ScriptParser.ErrorObject("Expected THEN", "", token().pos);
+			}
+			advance(); // consume THEN
+
+			const commands: ParseNode[] = [];
+			while (token().type !== "endif" && token().type !== "(end)") {
+				commands.push(expression(0));
+				if (token().type === ";") {
+					advance();
+				}
+			}
+
+			if (token().type !== "endif") {
+				throw new ScriptParser.ErrorObject("Expected ENDIF", "", token().pos);
+			}
+			advance(); // consume ENDIF
+
+			return {
+				type: "if",
+				left: condition,
+				args: commands,
+				pos: condition.pos,
+				value: ""
+			};
 		});
 
 		symbol("formatter", undefined, 3, (left: ParseNode) => {
@@ -355,9 +434,10 @@ export default class ScriptParser {
 		infix("+", 4);
 		infix("-", 4);
 
-		infix("=", 1, 2, (left: ParseNode) => {
+		infix("=", 3, 2, (left: ParseNode) => {
 			let node: ParseNode;
-			if (left.type === "identifier") {
+			// If in an IF statement context, treat as comparison
+			if (left.type === "identifier" && !isInIfCondition) {
 				node = {
 					type: "assign",
 					name: left.value,
@@ -366,8 +446,16 @@ export default class ScriptParser {
 					pos: left.pos
 				};
 			} else {
-				node = tokens[index - 1];
-				throw new ScriptParser.ErrorObject("Invalid lvalue at", node.type, node.pos);
+				// Otherwise treat as comparison
+				node = {
+					type: "=",
+					left: left,
+					right: expression(2),
+					value: "",
+					pos: left.pos
+				};
+				//node = tokens[index - 1];
+				//throw new ScriptParser.ErrorObject(`Invalid lvalue ${left.type} at`, node.type, node.pos);
 			}
 			return node;
 		});
@@ -378,7 +466,7 @@ export default class ScriptParser {
 		return parseTree;
 	}
 
-	evaluate(parseTree: ParseNode[], variables: Variables, functions: Functions): string {
+	evaluate(parseTree: ParseNode[], variableAccess: VariableAccessType, functions: Functions): string {
 		const that = this;
 		const operators: Record<string, any> = {
 			"+": (a: any, b: any) => Number(a) + Number(b),
@@ -386,9 +474,18 @@ export default class ScriptParser {
 			"*": (a: number, b: number) => a * b,
 			"/": (a: number, b: number) => a / b,
 			"%": (a: any, b: any) => a % b,
-			"^": (a: any, b: any) => Math.pow(a, b)
+			"^": (a: any, b: any) => Math.pow(a, b),
+
+			"=": (a: any, b: any) => String(a) === String(b),
+			"<>": (a: any, b: any) => String(a) !== String(b),
+			"<": (a: any, b: any) => String(a) < String(b),
+			">": (a: any, b: any) => String(a) > String(b),
+			"<=": (a: any, b: any) => String(a) <= String(b),
+			">=": (a: any, b: any) => String(a) >= String(b)
 		};
 		const mFunctions = functions;
+
+		const output: string[] = [];
 
 		const checkArgs = (name: string, aArgs: any[], iPos: number) => {
 			const oFunction = mFunctions[name];
@@ -396,7 +493,7 @@ export default class ScriptParser {
 			if (oFunction.length !== aArgs.length) {
 				const optionalArgs = mFunctions[`${name}_optionalArgs`]?.();
 				if (optionalArgs) {
-					if (optionalArgs === Number.POSITIVE_INFINITY) { // varargs (needed for concat)?
+					if (optionalArgs === Number.POSITIVE_INFINITY) { // varargs (needed for _concat)?
 						return;
 					}
 					const iMin = oFunction.length - Number(optionalArgs); // optionalArgs (instr)
@@ -429,9 +526,11 @@ export default class ScriptParser {
 				}
 			} else if (node.type === "identifier") {
 				sName = fnAdaptVariableName(node.value as string);
-				value = variables[sName];
+				value = variableAccess.get(sName);
 				if (value === undefined) {
-					throw new ScriptParser.ErrorObject("Variable is undefined", String(node.value), node.pos);
+					//throw new ScriptParser.ErrorObject("Variable is undefined", String(node.value), node.pos);
+					console.log(`Variable is undefined: ${node.value} (pos ${node.pos})`);
+					value = "";
 				}
 			} else if (node.type === "assign") {
 				value = parseNode(node.right!); //value = parseNode(node.value!);
@@ -439,39 +538,48 @@ export default class ScriptParser {
 				if (value === null) {
 					throw new ScriptParser.ErrorObject("value is null", sName, node.pos); // should not occure
 				}
-				variables[sName] = value;
+				variableAccess.set(sName, value);
 				if (String(parseFloat(String(value))) !== String(value)) { //TTT tocheck!
 					value = '"' + value + '"';
 				}
 				value = node.name + "=" + value;
-			} else if (node.type === "call") {
+			} else if (node.type === "if") {
+				const condition = parseNode(node.left!);
+				if (condition) {
+					const results: string[] = [];
+					for (const cmd of node.args!) {
+						const result = parseNode(cmd);
+						if (result === null) {
+							if (cmd.type === "cls") {
+								output.length = 0;
+								results.length = 0;
+							} else if (cmd.type === "stop") {
+								//i = parseTree.length; // stop TODO
+							} else if (result !== "") {
+								results.push(String(result));
+							}
+						}
+					}
+					value = results.join("\n");
+				} else {
+					value = "";
+				}
+			} else if (node.type === "stop") {
+				value = null;
+			} else if (keywordsMap[node.type]) { // "is" and "stop" are already handled
 				const aNodeArgs = [];
 				for (let i = 0; i < node.args!.length; i += 1) {
 					aNodeArgs[i] = parseNode(node.args![i]);
 				}
-				sName = fnAdaptFunctionName(node.name!);
+				sName = fnAdaptFunctionName(node.type);
 				if (mFunctions[sName] === undefined) {
-					throw new ScriptParser.ErrorObject("Function is undefined", sName, node.pos);
+					throw new ScriptParser.ErrorObject("Function is undefined", sName, node.pos); // should not occur
 				}
-				checkArgs(sName, aNodeArgs, node.pos!);
+				checkArgs(sName, aNodeArgs, node.pos);
 				value = mFunctions[sName].apply(node, aNodeArgs);
-			/*
-			} else if (node.type === "function") {
-				sName = fnAdaptFunctionName(node.name!);
-				mFunctions[sName] = function (...args: any[]) {
-					const oArgs: Variables = {};
-					for (let i = 0; i < node.args!.length; i += 1) {
-						oArgs[node.args![i].value as string] = args[i];
-					}
-					aFunctionScope.push(oArgs);
-					value = parseNode(node.value! as ParseNode);
-					aFunctionScope.pop();
-					return value;
-				};
-			*/
 			} else if (node.type === "formatter") {
 				value = parseNode(node.left!);
-				value = mFunctions.numFormat(value, node.value);
+				value = numFormat(String(value), node.value);
 			} else {
 				console.error("parseNode node=%o unknown type=" + node.type, node);
 				value = String(node);
@@ -479,14 +587,18 @@ export default class ScriptParser {
 			return value;
 		};
 
-		const output: string[] = [];
 		for (let i = 0; i < parseTree.length; i += 1) {
 			// if (Utils.debug > 2) {
 			//     Utils.console.debug("evaluate: parseTree i=%d, node=%o", i, parseTree[i]);
 			// }
-			const result = parseNode(parseTree[i]);
-			if (result === null) { // cls
-				output.length = 0;
+			const node = parseTree[i];
+			const result = parseNode(node);
+			if (result === null) { // cls, stop on single line?
+				if (node.type === "cls") {
+					output.length = 0;
+				} else if (node.type === "stop") {
+					i = parseTree.length; // stop
+				}
 			} else if (result !== "") {
 				output.push(String(result));
 			}
@@ -494,34 +606,12 @@ export default class ScriptParser {
 		return output.join("\n");
 	}
 
-	calculate(input: string, variables: Variables): string {
+	calculate(input: string, variableAccess: VariableAccessType): string {
 		const that = this;
 		const mFunctions = {
-			// concat(s1, s2, ...) concatenate strings (called by operator [..] ); varargs
-			concat_optionalArgs: () => Number.POSITIVE_INFINITY,
-			concat: (...args: (string | number)[]) => args.join(""),
-
-			// needed for formatter
-			numFormat: (s: string, format: string) => {
-				if (format.indexOf(".") < 0) {
-					s = Number(s).toFixed(0);
-					s = mFunctions.zFormat(s, format.length);
-				} else { // assume 000.00
-					const aFormat = format.split(".", 2);
-					s = Number(s).toFixed(aFormat[1].length);
-					s = mFunctions.zFormat(s, format.length);
-				}
-				return s;
-			},
-
-			// needed for sval
-			zFormat: (s: string, length: number) => {
-				s = String(s);
-				for (let i = s.length; i < length; i += 1) {
-					s = "0" + s;
-				}
-				return s;
-			},
+			// _concat(s1, s2, ...) concatenate strings (called by operator [..] ); varargs
+			_concat_optionalArgs: () => Number.POSITIVE_INFINITY,
+			_concat: (...args: (string | number)[]) => args.join(""),
 
 			//
 
@@ -642,8 +732,8 @@ export default class ScriptParser {
 				return sValue;
 			},
 
-			goto: () => {
-				console.log("goto ignored."); //TTT
+			goto: (w1: string) => {
+				console.log(`goto ${w1}: ignored.`);
 			},
 
 			// ic(n) Ignore variable andd function case
@@ -733,7 +823,7 @@ export default class ScriptParser {
 
 				s = String(s).toLowerCase().replace(/[^a-z]/g, "");
 				for (let i = 0; i < s.length; i += 1) {
-					sOut += ((i > 0) ? " " : "") + mFunctions.zFormat(s.charCodeAt(i) - iCodeBeforeA, 2);
+					sOut += ((i > 0) ? " " : "") + zFormat(String(s.charCodeAt(i) - iCodeBeforeA), 2);
 				}
 				return sOut;
 			},
@@ -778,7 +868,13 @@ export default class ScriptParser {
 
 		const tokens = this.lex(input);
 		const parseTree = this.parse(tokens);
-		const output = this.evaluate(parseTree, variables, mFunctions);
+		const output = this.evaluate(parseTree, variableAccess, mFunctions);
 		return output;
 	}
 }
+
+// TODO:
+// - statements: IF THEN ELSE
+// - all functions as keywords? Known already in lex?
+// - LatLng: use L.LatLon for internal pos?
+//

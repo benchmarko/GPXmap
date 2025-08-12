@@ -1,4 +1,15 @@
-import ScriptParser from './ScriptParser';
+import ScriptParser, { type VariableAccessType } from './ScriptParser';
+
+function getVariableAccess(vars = {}) {
+    const variableAccess: VariableAccessType = {
+        vars,
+        get: (name: string) => variableAccess.vars[name],
+        set: (name: string, value: string | number) => {
+            variableAccess.vars[name] = value;
+        }
+    };
+    return variableAccess;
+}
 
 describe('ScriptParser', () => {
     let parser: ScriptParser;
@@ -81,8 +92,8 @@ describe('ScriptParser', () => {
             const tree = parser.parse(tokens);
             expect(tree).toHaveLength(1);
             expect(tree[0]).toEqual({
-                type: 'call',
-                name: 'sin',
+                type: 'sin',
+                name: '',
                 args: [{ type: 'number', value: "45", pos: 4 }],
                 pos: 0,
                 value: ""
@@ -104,96 +115,101 @@ describe('ScriptParser', () => {
     });
 
     describe('evaluate', () => {
-        const variables = {};
-        const functions = {
-            sin: Math.sin,
-            add: (a: number, b: number) => a + b
+        const variableAccess: VariableAccessType = {
+            vars: {},
+            get: (name: string) => variableAccess.vars[name],
+            set: (name: string, value: string | number) => {
+                variableAccess.vars[name] = value;
+            }
         };
-
         it('should evaluate arithmetic expressions', () => {
             const tokens = parser.lex('1 + 2 * 3');
             const tree = parser.parse(tokens);
-            const result = parser.evaluate(tree, variables, functions);
+            const result = parser.evaluate(tree, variableAccess, {});
             expect(result).toBe("7");
         });
 
         it('should evaluate function calls', () => {
-            const tokens = parser.lex('add(2, 3)');
+            const tokens = parser.lex('abs(-5)');
             const tree = parser.parse(tokens);
-            const result = parser.evaluate(tree, variables, functions);
+            const result = parser.evaluate(tree, variableAccess, {
+                abs: Math.abs
+            });
             expect(result).toBe("5");
         });
 
         it('should handle variable assignments', () => {
             const tokens = parser.lex('x = 42');
             const tree = parser.parse(tokens);
-            const result = parser.evaluate(tree, variables, functions);
+            const result = parser.evaluate(tree, variableAccess, {});
             expect(result).toBe('x=42');
-            expect(variables).toHaveProperty('x', 42);
+            expect(variableAccess.get('x')).toBe(42);
         });
     });
 
     describe('calculate', () => {
-        const variables = { x: 10, y: 20 };
+        const variableAccess = getVariableAccess({ x: 10, y: 20 });
 
         it('should calculate arithmetic expressions', () => {
-            const result = parser.calculate('x + y * 2', variables);
+            const result = parser.calculate('x + y * 2', variableAccess);
             expect(result).toEqual("50");
         });
 
         it('should handle built-in functions', () => {
-            const result = parser.calculate('sin(90)', variables);
+            const result = parser.calculate('sin(90)', variableAccess);
             expect(parseFloat(result)).toBeCloseTo(1, 5);
         });
 
         it('should handle errors', () => {
             expect(() => {
-                parser.calculate('undefined_func()', variables)
-            }).toThrow('Function is undefined: undefined_func (pos: 0)');
+                parser.calculate('undefined_func()', variableAccess)
+                //}).toThrow('Function is undefined: undefined_func (pos: 0)');
+            }).toThrow('Unexpected token (nud): ) (pos: 15)');
         });
 
         it('should support string operations', () => {
-            const result = parser.calculate('concat("Hello", " ", "World")', variables);
+            const result = parser.calculate('_concat("Hello", " ", "World")', variableAccess);
             expect(result).toEqual('Hello World');
         });
 
         it('should handle variable case sensitivity', () => {
             const parser = new ScriptParser({ ignoreVarCase: true });
             const vars = { abc: 42 };
-            const result = parser.calculate('ABC', vars);
+            const icVariableAccess = getVariableAccess(vars);
+            const result = parser.calculate('ABC', icVariableAccess);
             expect(result).toEqual("42");
         });
     });
 
     describe('built-in functions', () => {
-        const variables = {};
+        const variableAccess = getVariableAccess();
 
         it('should calculate cross total', () => {
-            const result = parser.calculate('ct(123)', variables);
+            const result = parser.calculate('ct(123)', variableAccess);
             expect(result).toEqual("6");
         });
 
         it('should count character occurrences', () => {
-            const result = parser.calculate('count("hello", "l")', variables);
+            const result = parser.calculate('count("hello", "l")', variableAccess);
             expect(result).toEqual("2");
         });
 
         it('should perform string value calculations', () => {
-            const result = parser.calculate('val("ABC")', variables);
+            const result = parser.calculate('val("ABC")', variableAccess);
             expect(result).toEqual("6"); // A=1, B=2, C=3
         });
 
         it('should format numbers', () => {
-            const result = parser.calculate('3.14:000.00:', variables);
+            const result = parser.calculate('3.14:000.00:', variableAccess);
             expect(result).toEqual('003.14');
         });
     });
 
     describe('geographic functions', () => {
-        const variables = {};
+        const variableAccess = getVariableAccess();
 
         it('should calculate bearing between coordinates', () => {
-            const result = parser.calculate('bearing("N 45 00.000 E 010 00.000", "N 46 00.000 E 010 00.000")', variables);
+            const result = parser.calculate('bearing("N 45 00.000 E 010 00.000", "N 46 00.000 E 010 00.000")', variableAccess);
             expect(result).toBeDefined();
             const bearing = parseFloat(result);
             expect(bearing).toBeGreaterThanOrEqual(0);
@@ -201,14 +217,14 @@ describe('ScriptParser', () => {
         });
 
         it('should calculate distance between coordinates', () => {
-            const result = parser.calculate('distance("N 45 00.000 E 010 00.000", "N 46 00.000 E 010 00.000")', variables);
+            const result = parser.calculate('distance("N 45 00.000 E 010 00.000", "N 46 00.000 E 010 00.000")', variableAccess);
             expect(result).toBeDefined();
             const distance = parseFloat(result);
             expect(distance).toBeGreaterThan(0);
         });
 
         it('should project coordinates', () => {
-            const result = parser.calculate('project("N 45 00.000 E 010 00.000", 90, 10000)', variables);
+            const result = parser.calculate('project("N 45 00.000 E 010 00.000", 90, 10000)', variableAccess);
             expect(result).toBeDefined();
             expect(result).toMatch(/N \d+/);
             expect(result).toMatch(/E \d+/);
@@ -232,12 +248,12 @@ describe('ScriptParser', () => {
             "[5 3.14]": "53.14", // Number Number=String
             '[3.14 "15" 92 65]': "3.14159265",
 
-            "concat()": "",
-            "concat(5)": "5",
-            'concat("5", "3.14")': "53.14", // String String=String
-            'concat("5", 3.14)': "53.14", // String Number=String
-            "concat(5, 3.14)": "53.14", // Number Number=String
-            'concat(3.14, "15", 92, 65)': "3.14159265",
+            "_concat()": "",
+            "_concat(5)": "5",
+            '_concat("5", "3.14")': "53.14", // String String=String
+            '_concat("5", 3.14)': "53.14", // String Number=String
+            "_concat(5, 3.14)": "53.14", // Number Number=String
+            '_concat(3.14, "15", 92, 65)': "3.14159265",
 
             "abs(3.14)": "3.14",
             "abs(-3.14)": "3.14",
@@ -314,8 +330,8 @@ describe('ScriptParser', () => {
 
             Object.entries(calculationTests).forEach(([input, expected]) => {
                 try {
-                    const variables = {};
-                    const result = parser.calculate(input, variables);
+                    const variableAccess = getVariableAccess();
+                    const result = parser.calculate(input, variableAccess);
                     expect(result).toBe(expected);
                 } catch (e) {
                     //const errorMessage = error instanceof ScriptParser.ErrorObject ? error.message : String(error);
@@ -334,8 +350,8 @@ describe('ScriptParser', () => {
             };
 
             Object.entries(infinityTests).forEach(([input, expected]) => {
-                const variables = {};
-                const result = parser.calculate(input, variables);
+                const variableAccess = getVariableAccess();
+                const result = parser.calculate(input, variableAccess);
                 //expect(parseFloat(result)).toBe(expected);
                 expect(result).toBe(expected);
             });

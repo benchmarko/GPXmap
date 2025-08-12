@@ -4,7 +4,7 @@ import 'leaflet.markercluster';
 import type { FeatureGroup, MarkerClusterGroup } from 'leaflet';
 
 import LatLng from "./LatLng";
-import ScriptParser from './ScriptParser';
+import ScriptParser, { type VariableAccessType } from './ScriptParser';
 import { ZipFile } from "./ZipFile";
 
 declare global {
@@ -133,7 +133,6 @@ function getIcon(cacheType: string): L.DivIcon {
         iconCache[cacheType] = L.divIcon({
             className: 'custom-cache-icon',
             // circle with x in the middle
-            //html: `<svg width="${size}" height="${size}" stroke="black" stroke-width="1"><circle cx="${size / 2}" cy="${size / 2}" r="${size / 2 - 1}" fill="${color}" /><line x1="6" y1="6" x2="16" y2="16" /><line x1="16" y1="6" x2="6" y2="16" /></svg>`,
             html: `<svg width="${size}" height="${size}" stroke="black" stroke-width="1">
             <circle cx="${size / 2}" cy="${size / 2}" r="${size / 2 - 1}" fill="${color}" />
             <line x1="${size * 0.27}" y1="${size * 0.27}" x2="${size * 0.73}" y2="${size * 0.73}" />
@@ -390,29 +389,37 @@ function parseSolverCode(input: string, variables: Record<string, string | numbe
         //input = input.replaceAll('\u2013', '-');
     }
 
+    const variableAccess: VariableAccessType = {
+        vars: {},
+        get: (name: string) => {
+            let value = variables[name];
+            if (value === undefined) {
+                if (name.startsWith("$")) {
+                    const name2 = name.substring(1);
+                    const waypointData = waypointDataMap[name2];
+                    if (waypointData) {
+                        value = position2dmm(waypointData.lat, waypointData.lon);
+                    }
+                }
+            }
+            return value;
+        },
+        set: (name: string, value: string | number) => {
+            variables[name] = value;
+        } 
+    }
+
     try {
-        const output = new ScriptParser().calculate(input, variables);
+        const output = new ScriptParser().calculate(input, variableAccess);
         if (config.debug > 1) {
             console.debug("DEBUG: parseSolverCode: ", output, variables);
         }
         return String(output);
     } catch (e) {
-        //const errorMsg = e instanceof Error ? String(e) : `Unknown error: ${e}`;
         const errorMsg = String(e);
         console.error(errorMsg);
         return `<span style="color: red">Error: ${errorMsg}</span><br>\n`;
     }
-
-    /*
-    if (!output.error) {
-        return output.text;
-    }
-    const oError = output.error;
-    const iEndPos = oError.pos + ((oError.value !== undefined) ? String(oError.value).length : 0);
-    const errorMsg = oError.message + ": '" + oError.value + "' (pos " + oError.pos + "-" + iEndPos + ")";
-    */
-    //console.error(errorMsg);
-    //return `<span style="color: red">${errorMsg}</span><br>\n`;
 }
 
 function prepareSolverMarkersData(solverPoints: [string, string | number][]) {
@@ -462,12 +469,8 @@ function selectMarker(marker: MarkerType): void {
         if (text) {
             infoContent += text.replace(/\n/g, '<br>\n');;
         }
-        //infoContent += Object.entries(variables).map(([key, value]) => `${key}: ${value}` ).join("<br>\n");
         const solverPoints = Object.entries(variables).filter(([key, _value]) => key.startsWith("$"));
-        //const solverMarkersData = solverMarkersDataList;
-        //solverMarkersDataList.length = 0;
         const solverMarkersData = prepareSolverMarkersData(solverPoints); //TTT
-        //solverMarkersDataList.push(...solverMarkersData);
         renderSolverMarkers(solverMarkersData);
         setPolyline(solverMarkersData);
     }
@@ -484,18 +487,11 @@ function selectSolverMarker(marker: MarkerType): void {
     const distance = isInitialLocation ? -1 : marker.getLatLng().distanceTo(currentLatLng);
     const bearing = getBearing(currentLatLng, marker.getLatLng());
 
-    //let infoContent = prepareInfoContent(data, distance, bearing);
-
     const popupContent = preparePopupContent(data, distance, bearing);
-
-    //console.log("DDD:", popupContent);
 
     solverPopup
         .setLatLng(marker.getLatLng())
         .setContent(popupContent);
-
-
-    //setWaypointInfoHtml(infoContent);
 }
 
 function onWaypointGroupClick(e: L.LeafletMouseEvent): void {
