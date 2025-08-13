@@ -23,7 +23,7 @@ interface SymbolType {
 	led?: ParseFunction // left denotative function
 }
 
-export type VariableAccessType = { //Record<string, string | number>;
+export type VariableAccessType = {
 	vars: Record<string, string | number>,
 	get: (name: string) => string | number,
 	set: (name: string, value: string | number) => void
@@ -41,27 +41,27 @@ const keywordsMap = [...functionList, ...commandList].reduce((acc, keyword) => {
 const toRadians = (deg: number) => deg * Math.PI / 180;
 const toDegrees = (rad: number) => rad * 180 / Math.PI;
 
-				// needed for sval
-	const zFormat = (s: string, length: number) => {
-				s = String(s);
-				for (let i = s.length; i < length; i += 1) {
-					s = "0" + s;
-				}
-				return s;
-			};
+// needed for sval
+const zFormat = (s: string, length: number) => {
+	s = String(s);
+	for (let i = s.length; i < length; i += 1) {
+		s = "0" + s;
+	}
+	return s;
+};
 
-	// needed for formatter
-	const numFormat = (s: string, format: string) => {
-				if (format.indexOf(".") < 0) {
-					s = Number(s).toFixed(0);
-					s = zFormat(s, format.length);
-				} else { // assume 000.00
-					const aFormat = format.split(".", 2);
-					s = Number(s).toFixed(aFormat[1].length);
-					s = zFormat(s, format.length);
-				}
-				return s;
-			};
+// needed for formatter
+const numFormat = (s: string, format: string) => {
+	if (format.indexOf(".") < 0) {
+		s = Number(s).toFixed(0);
+		s = zFormat(s, format.length);
+	} else { // assume 000.00
+		const aFormat = format.split(".", 2);
+		s = Number(s).toFixed(aFormat[1].length);
+		s = zFormat(s, format.length);
+	}
+	return s;
+};
 
 const regExpEscape = (s: string) => {
 	return s.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&"); // (github.com/benjamingr/RegExp.escape), one / removed
@@ -87,7 +87,7 @@ export default class ScriptParser {
 
 	lex(input: string): Token[] {
 		const isComment = (c: string) => /[#]/.test(c);
-		const isOperator = (c: string) => /[+\-*/^%=()[\],]/.test(c);
+		const isOperator = (c: string) => /[+\-*/^%=<>()[\],;]/.test(c);
 		const isDigit = (c: string) => /[0-9]/.test(c);
 		const isWhiteSpace = (c: string) => /\s/.test(c);
 		const isQuotes = (c: string) => /["]/.test(c);
@@ -143,7 +143,16 @@ export default class ScriptParser {
 			} else if (isComment(sChar)) {
 				advanceWhile(isNotNewLine);
 			} else if (isOperator(sChar)) {
-				addToken(sChar, 0, iStartPos);
+				let op = sChar;
+				const nextChar = input.charAt(iIndex + 1);
+				if ((sChar === '<' || sChar === '>') && nextChar === '=') {
+					op += nextChar;
+					advance();
+				} else if (sChar === '<' && nextChar === '>') {
+					op += nextChar;
+					advance();
+				}
+				addToken(op, 0, iStartPos);
 				sChar = advance();
 			} else if (isDigit(sChar)) {
 				sToken = advanceWhile(isDigit);
@@ -293,6 +302,7 @@ export default class ScriptParser {
 		symbol(")");
 		symbol("]");
 		symbol("(end)");
+		symbol(";");
 
 		symbol("number", fnNode);
 		symbol("string", fnNode);
@@ -434,6 +444,13 @@ export default class ScriptParser {
 		infix("+", 4);
 		infix("-", 4);
 
+		// Comparison operators
+		infix("<", 4);
+		infix(">", 4);
+		infix("<=", 4);
+		infix(">=", 4);
+		infix("<>", 4);
+
 		infix("=", 3, 2, (left: ParseNode) => {
 			let node: ParseNode;
 			// If in an IF statement context, treat as comparison
@@ -555,9 +572,9 @@ export default class ScriptParser {
 								results.length = 0;
 							} else if (cmd.type === "stop") {
 								//i = parseTree.length; // stop TODO
-							} else if (result !== "") {
-								results.push(String(result));
 							}
+						} else if (result !== "") {
+							results.push(String(result));
 						}
 					}
 					value = results.join("\n");
@@ -566,7 +583,7 @@ export default class ScriptParser {
 				}
 			} else if (node.type === "stop") {
 				value = null;
-			} else if (keywordsMap[node.type]) { // "is" and "stop" are already handled
+			} else if (keywordsMap[node.type]) { // "if" and "stop" are already handled
 				const aNodeArgs = [];
 				for (let i = 0; i < node.args!.length; i += 1) {
 					aNodeArgs[i] = parseNode(node.args![i]);
@@ -734,6 +751,7 @@ export default class ScriptParser {
 
 			goto: (w1: string) => {
 				console.log(`goto ${w1}: ignored.`);
+				return "";
 			},
 
 			// ic(n) Ignore variable andd function case
@@ -874,7 +892,5 @@ export default class ScriptParser {
 }
 
 // TODO:
-// - statements: IF THEN ELSE
-// - all functions as keywords? Known already in lex?
 // - LatLng: use L.LatLon for internal pos?
 //

@@ -232,6 +232,80 @@ describe('ScriptParser', () => {
 
     });
 
+    describe('if statements', () => {
+        let variableAccess: VariableAccessType;
+
+        beforeEach(() => {
+            variableAccess = getVariableAccess({ x: 10 });
+        });
+
+        it('should execute commands when condition is true', () => {
+            const result = parser.calculate('if 1 then x = 20 endif', variableAccess);
+            expect(result).toBe('x=20');
+            expect(variableAccess.get('x')).toBe(20);
+        });
+
+        it('should not execute commands when condition is false', () => {
+            const result = parser.calculate('if 0 then x = 20 endif', variableAccess);
+            expect(result).toBe('');
+            expect(variableAccess.get('x')).toBe(10); // x remains unchanged
+        });
+
+        it('should support multiple commands in if block', () => {
+            const result = parser.calculate('if 1 then x = 20; x = x + 5 endif', variableAccess);
+            expect(result).toBe('x=20\nx=25');
+            expect(variableAccess.get('x')).toBe(25);
+        });
+
+        it('should support = comparison in if conditions', () => {
+            const result = parser.calculate('if x = 10 then x = 20 endif', variableAccess);
+            expect(result).toBe('x=20');
+            expect(variableAccess.get('x')).toBe(20);
+        });
+
+        it('should support <> comparison in if conditions', () => {
+            const result = parser.calculate('if x <> 30 then x = 30 endif', variableAccess);
+            expect(result).toBe('x=30');
+            expect(variableAccess.get('x')).toBe(30);
+        });
+
+        it('should support < comparison in if conditions', () => {
+            const result = parser.calculate('if x < 20 then x = 40 endif', variableAccess);
+            expect(result).toBe('x=40');
+            expect(variableAccess.get('x')).toBe(40);
+        });
+
+        it('should support > comparison in if conditions', () => {
+            const result = parser.calculate('if x > 0 then x = 50 endif', variableAccess);
+            expect(result).toBe('x=50');
+            expect(variableAccess.get('x')).toBe(50);
+        });
+
+        it('should support <= comparison in if conditions', () => {
+            const result = parser.calculate('if x <= 10 then x = 60 endif', variableAccess);
+            expect(result).toBe('x=60');
+            expect(variableAccess.get('x')).toBe(60);
+        });
+
+        it('should support >= comparison in if conditions', () => {
+            const result = parser.calculate('if x >= 10 then x = 70 endif', variableAccess);
+            expect(result).toBe('x=70');
+            expect(variableAccess.get('x')).toBe(70);
+        });
+
+        it('should throw error when missing then', () => {
+            expect(() => {
+                parser.calculate('if 1 x = 20 endif', variableAccess);
+            }).toThrow('Expected THEN');
+        });
+
+        it('should throw error when missing endif', () => {
+            expect(() => {
+                parser.calculate('if 1 then x = 20', variableAccess);
+            }).toThrow('Expected ENDIF');
+        });
+    });
+
     describe('calculation tests', () => {
 
         const calculationTests = {
@@ -299,6 +373,25 @@ describe('ScriptParser', () => {
 
             'count("str1,str2,str3,str4",",")': "3",
             'count("str1,str2,str3,st","str")': "s=4 t=4 r=3",
+
+            // Comparison operators (currently all are string comparisons)
+
+            "5 < 60": "true",
+            "15 < 10": "false",
+            "5 > 60": "false", 
+            "15 > 10": "true",
+            "10 <= 10": "true",
+            "5 <= 60": "true",
+            "15 <= 10": "false",
+            "10 >= 10": "true",
+            "15 >= 10": "true",
+            "5 >= 60": "false",
+            "5 <> 10": "true",
+            "10 <> 10": "false",
+            '"abc" < "def"': "true",
+            '"def" < "abc"': "false",
+            '"abc" <> "def"': "true",
+            '"abc" <> "abc"': "false",
 
             'mid("abcABCabc",3,5)': "cABCa",
 
