@@ -140,7 +140,7 @@ function getIcon(cacheType: string): L.DivIcon {
             </svg>`,
             iconSize: [size, size],
             iconAnchor: [size / 2, size / 2],
-            popupAnchor: [0, -size]
+            popupAnchor: [0, -size / 2]
         });
     }
     return iconCache[cacheType];
@@ -302,9 +302,10 @@ function preparePopupContent(data: WaypointDataType, distance: number, bearing: 
     const dmm = position2dmm(data.lat, data.lon);
     const desc = insertNewlineAtLastMatch(insertNewlineAtLastMatch(data.desc, ' by ', true), ',', false);
     const distanceStr = distance >= 0 ? `<br>Distance: ${formatDistance(distance)} ${getDirection(bearing)} (${bearing.toFixed(0)}°)` : '';
-
+    const name = data.name;
+    const nanmeStr = name.startsWith("GC") ? `<a href="https://coord.info/${name}" target="_blank">${name}</a>` : name;
     const popupContent = `
-<strong>${data.name}</strong><br>
+<strong>${nanmeStr}</strong><br>
 <span>${desc}</span><br>
 <small>${dmm}${distanceStr}</small><br>
 ${moreInfo}
@@ -369,7 +370,9 @@ function prepareInfoContent(data: WaypointDataType, distance: number, bearing: n
 
     const dmm = position2dmm(data.lat, data.lon);
     const distanceStr = distance >= 0 ? `Distance: ${formatDistance(distance)} ${getDirection(bearing)} (${bearing.toFixed(0)}°)<br>\n` : ''
-    const infoContent = `${data.name}<br>\n${dmm}<br>\n${distanceStr}${data.desc}<br>\n${cacheInfo}`;
+    const name = data.name;
+    const nanmeStr = name.startsWith("GC") ? `<a href="https://coord.info/${name}" target="_blank">${name}</a>` : name;
+    const infoContent = `${nanmeStr}<br>\n${dmm}<br>\n${distanceStr}${data.desc}<br>\n${cacheInfo}`;
     return infoContent;
 }
 
