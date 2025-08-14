@@ -479,7 +479,7 @@ function selectMarker(marker: MarkerType): void {
 }
 
 function selectSolverMarker(marker: MarkerType): void {
-    selectedMarker = marker;
+    // no not set selectedMarker, keep it
     const data = solverDataMap[marker.waypointName];
 
     const currentLatLng = locationMarker.getLatLng();
