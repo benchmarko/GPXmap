@@ -1,6 +1,6 @@
 {
   "name": "gpxmap",
-  "version": "0.1.25",
+  "version": "0.1.26",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -17,8 +17,6 @@
     "ts-jest": "^29.4.1",
     "typescript": "~5.8.3",
     "vite": "^7.0.0",
-    "vite-plugin-html": "^3.2.2",
-    "vite-plugin-singlefile": "^2.3.0",
     "vite-plugin-static-copy": "^3.1.1"
   },
   "dependencies": {

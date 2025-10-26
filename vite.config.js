@@ -1,7 +1,5 @@
 import { defineConfig } from 'vite';
-import { viteSingleFile } from "vite-plugin-singlefile"
 import { viteStaticCopy } from 'vite-plugin-static-copy';
-import { createHtmlPlugin } from 'vite-plugin-html';
 import pkg from './package.json' with { type: 'json' };
 
 export default defineConfig({
@@ -10,24 +8,43 @@ export default defineConfig({
   build: {
     target: 'esnext',
     sourcemap: true,
-    modulePreload: false
+    modulePreload: false,
+    outDir: 'dist',
+    rollupOptions: {
+      external: ['leaflet'],
+      output: {
+        format: 'iife',
+        name: 'GPXmap',
+        generatedCode: {
+          constBindings: true
+        },
+        entryFileNames: 'assets/[name].js',
+        assetFileNames: 'assets/[name].[ext]',
+        globals: {
+          leaflet: 'L'
+        }
+      }
+    },
+    // Set as normal application build instead of library
+    lib: false
   },
 
   plugins: [
-    createHtmlPlugin({
-      minify: false,
-      inject: {
-        data: {
-          version: pkg.version
-        }
-      }
-    }),
-    viteSingleFile(),
     viteStaticCopy({
       targets: [
         {
           src: 'examples/gc*.js',
           dest: 'examples'
+        },
+        {
+          src: 'index.html',
+          dest: '.',
+          transform: (content) => {
+            return content
+              .toString()
+              .replace(/<script.*?src="\/src\/main.ts".*?>/, '<script src="./assets/index.js">')
+              .replace('<%= version %>', pkg.version);
+          }
         }
       ]
     })
