@@ -37,6 +37,8 @@ type WaypointDataType = {
     type: string;
     desc: string;
     cacheInfo: string;
+    solverCode: string;
+    solverCodeEdited?: string;
 };
 
 type WaypointDataMapType = Record<string, WaypointDataType>;
@@ -288,13 +290,13 @@ function getBearing(from: L.LatLng, to: L.LatLng): number {
     return (toDeg(brng) + 360) % 360; // Normalize to 0-360
 }
 
-function preparePopupContent(data: WaypointDataType, distance: number, bearing: number): string {
+function preparePopupContent(data: WaypointDataType, solverCodeInHtml: string, distance: number, bearing: number): string {
     const moreInfo = data.cacheInfo ? `
 <details style="margin-top:4px;">
     <summary>More info</summary>
     <div style="margin-top:4px;">
         <div style="margin:0;max-height:120px;overflow:auto;border:1px solid #ccc;padding:4px;background:#fafafa;">
-            ${data.cacheInfo}
+            ${data.cacheInfo}${solverCodeInHtml}
         </div>
     </div>
 </details>` : '';
@@ -313,60 +315,60 @@ ${moreInfo}
     return popupContent;
 }
 
-function getSolverCodeFromInfo(cacheInfo: string) {
-    const solverData = cacheInfo.match(/<details><summary>Solver<\/summary><div class="gc_solver">(.+?)<\/div><\/details>/s);
-    let solverCode = '';
-    let index = -1;
-    if (solverData && solverData[1]) {
-        solverCode = solverData[1].replace(/<br\/?>\n/g, '\n').trim();
-        index = solverData.index || -1;
+function getWaypointFromLocalStorage(key: string): WaypointDataType | undefined {
+    const storedData = window.localStorage.getItem(key);
+    if (storedData) {
+        const data = JSON.parse(storedData) as any;
+        const wp: WaypointDataType = {
+            name: data.name,
+            lat: Number(data.lat) || 0,
+            lon: Number(data.lon) || 0,
+            type: data.type || '',
+            desc: data.desc || '',
+            cacheInfo: data.cacheInfo || '',
+            solverCode: data.solverCode,
+            solverCodeEdited: data.solverCodeEdited,
+        };
+        return wp;
     }
-    return { solverCode, index };
-}
-
-function getSolverCodeFromLocalStorage(key: string) {
-    const solverCode = window.localStorage.getItem(key);
-    return solverCode;
+    return undefined;
 }
 
 function getSolverCode(key: string) {
-    let code = getSolverCodeFromLocalStorage(key);
-    if (!code) {
-        const data = waypointDataMap[key];
-        const { solverCode } = getSolverCodeFromInfo(data.cacheInfo);
-        code = solverCode;
-    }
-    return code;
+    const data = waypointDataMap[key];
+    return data ? data.solverCodeEdited || data.solverCode : '';
 }
 
-function putSolverCodeIntoLocalStorage(key: string, solverCode: string) {
-    window.localStorage.setItem(key, solverCode);
+function putWaypointAndSolverIntoLocalStorage(key: string, waypoint: WaypointDataType) {
+    window.localStorage.setItem(key, JSON.stringify(waypoint));
 }
 
 function removeKeyFromLocalStorage(key: string) {
     window.localStorage.removeItem(key);
 }
 
-function prepareSolverCodeForInfo(solverCode: string) {
-    solverCode = solverCode.replace(/\n/g, '<br>\n');
-    return `<details><summary>Solver</summary><div class="gc_solver">${solverCode}<br>\n</div></details>\n`;
-}
-
-function prepareInfoContent(data: WaypointDataType, distance: number, bearing: number): string {
-    let cacheInfo = data.cacheInfo || '';
-
-    const localSolverCode = getSolverCodeFromLocalStorage(data.name);
-    if (localSolverCode) {
-        const { solverCode, index } = getSolverCodeFromInfo(cacheInfo);
-        if (index >= 0) {
-            cacheInfo = cacheInfo.substring(0, index); // strip solverCode
-        }
-        cacheInfo += prepareSolverCodeForInfo(localSolverCode); // add new solverCode
-        if (config.debug > 3) {
-            console.debug("DEBUG: oldSolverCode=", solverCode); //TTT
+function loadWaypointsFromLocalStorage() {
+    for (let i = 0; i < window.localStorage.length; i++) {
+        const key = window.localStorage.key(i);
+        if (key && key.startsWith('GC')) { // Only load geocache waypoints
+            const waypoint = getWaypointFromLocalStorage(key);
+            if (waypoint) {
+                waypointDataMap[key] = waypoint; // always override
+            }
         }
     }
-    cacheInfo = `<br>\n${cacheInfo}<br>\n`
+}
+
+function getSolverCodeInHtml(solverCode: string) {
+    if (solverCode) {
+        const solverCodePrepared = solverCode.replace(/\n/g, '<br>\n');
+        return `<details><summary>Solver</summary><div class="gc_solver">${solverCodePrepared}<br>\n</div></details>\n`;
+    }
+    return '';
+}
+
+function prepareInfoContent(data: WaypointDataType, solverCodeInHtml: string, distance: number, bearing: number): string {
+    const cacheInfo = `<br>\n${data.cacheInfo || ''}${solverCodeInHtml}<br>\n`;
 
     const dmm = position2dmm(data.lat, data.lon);
     const distanceStr = distance >= 0 ? `Distance: ${formatDistance(distance)} ${getDirection(bearing)} (${bearing.toFixed(0)}°)<br>\n` : ''
@@ -434,11 +436,13 @@ function prepareSolverMarkersData(solverPoints: [string, string | number][]) {
             lat: latLon.getLat(),
             lon: latLon.getLng(),
             type: "Solver",
-            desc: "",
-            cacheInfo: ""
+            desc: '',
+            cacheInfo: '',
+            solverCode: ''
         }
     });
     return markersData;
+    // TODO: a computed $GCxxx marker can overlay the GCxxx marker. How to access GCxxx marker?
 }
 
 let selectedMarker: MarkerType | undefined = undefined;
@@ -447,24 +451,25 @@ function selectMarker(marker: MarkerType): void {
     selectedMarker = marker;
     const data = waypointDataMap[marker.waypointName];
 
+    setButtonDisabled('editButton', false);
+    setButtonDisabled('saveButton', true); // TODO: do we need to save something?
+    setButtonDisabled('cancelButton', true);
+
     const currentLatLng = locationMarker.getLatLng();
     const isInitialLocation = currentLatLng.lat === 0 && currentLatLng.lng === 0;
     const distance = isInitialLocation ? -1 : marker.getLatLng().distanceTo(currentLatLng);
     const bearing = getBearing(currentLatLng, marker.getLatLng());
 
-    let infoContent = prepareInfoContent(data, distance, bearing);
+    const solverCode = getSolverCode(data.name); // or: marker.waypointName
+    const solverCodeInHtml = getSolverCodeInHtml(solverCode);
+    let infoContent = prepareInfoContent(data, solverCodeInHtml, distance, bearing);
 
-    setButtonDisabled('editButton', false);
-    setButtonDisabled('saveButton', true); // TODO: do we need to save something?
-    setButtonDisabled('cancelButton', true);
-
-    const popupContent = preparePopupContent(data, distance, bearing);
+    const popupContent = preparePopupContent(data, solverCodeInHtml, distance, bearing);
 
     popup
         .setLatLng(marker.getLatLng())
         .setContent(popupContent);
 
-    const solverCode = getSolverCode(marker.waypointName);
     if (solverCode) {
         const variables: Record<string, string | number> = {};
         const text = parseSolverCode(solverCode, variables);
@@ -490,7 +495,7 @@ function selectSolverMarker(marker: MarkerType): void {
     const distance = isInitialLocation ? -1 : marker.getLatLng().distanceTo(currentLatLng);
     const bearing = getBearing(currentLatLng, marker.getLatLng());
 
-    const popupContent = preparePopupContent(data, distance, bearing);
+    const popupContent = preparePopupContent(data, '', distance, bearing);
 
     solverPopup
         .setLatLng(marker.getLatLng())
@@ -581,6 +586,7 @@ function parseGpxFile(text: string, name: string): string {
 
         const cacheElem = wpt.getElementsByTagName('groundspeak:cache')[0];
         let cacheInfo = '';
+        let solverCode = '';
         if (cacheElem) {
             const archived = (cacheElem.getAttribute('archived') || '').toLowerCase() === 'true';
             const available = (cacheElem.getAttribute('available') || '').toLowerCase() === 'true';
@@ -591,11 +597,21 @@ function parseGpxFile(text: string, name: string): string {
             const hints = cacheElem.getElementsByTagName('groundspeak:encoded_hints')[0]?.textContent || '';
             // TODO: logs?
             cacheInfo = `- Cache Name: ${cacheName}<br>\n- Type: ${cacheType}<br>\n- Container: ${container}<br>\n- Archived: ${archived}<br>\n- Available: ${available}<br>\n- Hints: ${hints}<br>\n- Description:<br>\n${longDesc}`;
+
+            // Extract solverCode from cacheInfo if present
+            const match = cacheInfo.match(/<details><summary>Solver<\/summary><div class="gc_solver">(.+?)<\/div><\/details>/s);
+            if (match && match[1]) {
+                solverCode = match[1].replace(/<br\/?>(\n)?/g, '\n').trim();
+                const index = match.index || -1;
+                if (index >= 0) {
+                    cacheInfo = cacheInfo.substring(0, index); // strip solverCode
+                }
+            }
         }
         if (name in waypointDataMap) {
             overwritten += 1;
         }
-        waypointDataMap[name] = { name, lat, lon, type, desc, cacheInfo };
+        waypointDataMap[name] = { name, lat, lon, type, desc, cacheInfo, solverCode };
     }
     const overwrittenStr = overwritten ? ` (overwritten: ${overwritten})` : '';
     return `Processed file ${name} with ${wpts.length} waypoints${overwrittenStr}.`;
@@ -673,7 +689,7 @@ function onEditButtonClick(_event: Event) {
     const key = selectedMarker.waypointName;
     const code = getSolverCode(key);
     const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement;
-    waypointInfo.innerText = code;
+    waypointInfo.innerText = code || '';
     waypointInfo.setAttribute('contenteditable', "true"); //TTT or "plaintext-only"?
     setButtonDisabled('editButton', true);
     setButtonDisabled('saveButton', false);
@@ -689,12 +705,17 @@ function onSaveButtonClick(_event: Event) {
     const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement;
     waypointInfo.setAttribute('contenteditable', "false");
 
-    const solverCode = waypointInfo.innerText.trim(); // to be sure, we want text only
+    const solverCodeEdited = waypointInfo.innerText.trim(); // to be sure, we want text only
     const key = selectedMarker.waypointName;
-    if (solverCode) {
-        putSolverCodeIntoLocalStorage(key, solverCode);
-    } else {
-        removeKeyFromLocalStorage(key);
+    const data = waypointDataMap[key];
+    if (data) {
+        if (solverCodeEdited) {
+            data.solverCodeEdited = solverCodeEdited; // update in memory
+            putWaypointAndSolverIntoLocalStorage(key, data);
+        } else {
+            delete data.solverCodeEdited; // remove from memory
+            removeKeyFromLocalStorage(key);
+        }
     }
     selectMarker(selectedMarker);
     setButtonDisabled('editButton', false);
@@ -742,7 +763,7 @@ function locationShowPosition(position: GeolocationPosition) {
         const currentLatLng = locationMarker.getLatLng();
         const distance = marker.getLatLng().distanceTo(currentLatLng);
         const bearing = getBearing(currentLatLng, marker.getLatLng());
-        const popupContent = preparePopupContent(data, distance, bearing);
+        const popupContent = preparePopupContent(data, '', distance, bearing);
         popup.setContent(popupContent);
     }
     // TODO: update also waypoint info?
@@ -790,7 +811,7 @@ function onShowLocationInputChange(event: Event): void {
         if (popup.isOpen()) { // remove distance from popup...
             const marker = (popup as any)._source as MarkerType; // TTT: fast hack
             const data = waypointDataMap[marker.waypointName];
-            const popupContent = preparePopupContent(data, -1, -1); // no distance and bearing
+            const popupContent = preparePopupContent(data, '', -1, -1); // no distance and bearing
             popup.setContent(popupContent);
         }
     }
@@ -935,7 +956,7 @@ function main(): void {
     if (config.debug >= 10) {
         debugRedirectConsoleToWaypointInfo();
     }
-
+    
     map.setView([0, 0], 2);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap'
@@ -997,6 +1018,10 @@ function main(): void {
             } catch (e) {
                 console.error(e);
             }
+        } else {
+            loadWaypointsFromLocalStorage();
+            const waypointSearch = document.getElementById('waypointSearch') as HTMLInputElement;
+            filterWaypoints(waypointSearch.value);
         }
     }, 10);
 }
