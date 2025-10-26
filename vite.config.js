@@ -9,15 +9,8 @@ export default defineConfig({
   
   build: {
     target: 'esnext',
-    // modulePreload: false,
-    // rollupOptions: {
-    //   output: {
-    //     format: "umd",
-    //     inlineDynamicImports: true,
-    //     entryFileNames: 'assets/[name].js',
-    //     assetFileNames: 'assets/[name].[ext]'
-    //   }
-    // }
+    sourcemap: true,
+    modulePreload: false
   },
 
   plugins: [
