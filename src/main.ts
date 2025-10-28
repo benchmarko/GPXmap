@@ -509,8 +509,8 @@ function selectMarker(marker: MarkerType): void {
         if (text) {
             infoContent += text.replace(/\n/g, '<br>\n');;
         }
-        const solverPoints = Object.entries(variables).filter(([key, _value]) => key.startsWith("$"));
-        const solverMarkersData = prepareSolverMarkersData(solverPoints); //TTT
+        const solverPoints = Object.entries(variables).filter(([key]) => key.startsWith("$"));
+        const solverMarkersData = prepareSolverMarkersData(solverPoints);
         renderSolverMarkers(solverMarkersData);
         setPolyline(solverMarkersData);
     }
@@ -712,8 +712,7 @@ async function onFileInputChange(event: Event): Promise<void> {
     console.log(`Processed in ${endTime - startTime} ms`);
 }
 
-function onEditButtonClick(_event: Event) {
-    //const editButton = event.target as HTMLButtonElement;
+function onEditButtonClick(_event: Event) { // eslint-disable-line @typescript-eslint/no-unused-vars
     if (!selectedMarker) {
         console.error("No marker selected.");
         return;
@@ -722,14 +721,14 @@ function onEditButtonClick(_event: Event) {
     const code = getSolverCode(key);
     const waypointInfo = document.getElementById('waypointInfo') as HTMLDivElement;
     waypointInfo.innerText = code || '';
-    waypointInfo.setAttribute('contenteditable', "true"); //TTT or "plaintext-only"?
+    waypointInfo.setAttribute('contenteditable', "true");
     setButtonDisabled('editButton', true);
     setButtonDisabled('saveButton', false);
     setButtonDisabled('cancelButton', false);
     // no cancel?
 }
 
-function onSaveButtonClick(_event: Event) {
+function onSaveButtonClick(_event: Event) { // eslint-disable-line @typescript-eslint/no-unused-vars
     if (!selectedMarker) {
         console.error("No marker selected.");
         return;
@@ -754,7 +753,7 @@ function onSaveButtonClick(_event: Event) {
     setButtonDisabled('cancelButton', true);
 }
 
-function onCancelButtonClick(_event: Event) {
+function onCancelButtonClick(_event: Event) { // eslint-disable-line @typescript-eslint/no-unused-vars
     if (!selectedMarker) {
         console.error("No marker selected.");
         return;
@@ -1014,7 +1013,7 @@ function main(): void {
     }
 
     const waypointSearchClear = document.getElementById('waypointSearchClear') as HTMLButtonElement;
-    waypointSearchClear.addEventListener('click', (_e) => {
+    waypointSearchClear.addEventListener('click', (_e) => { // eslint-disable-line @typescript-eslint/no-unused-vars
         waypointSearch.value = '';
         filterWaypoints(waypointSearch.value);
     });

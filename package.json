@@ -10,12 +10,15 @@
     "test": "jest"
   },
   "devDependencies": {
+    "@eslint/js": "^9.38.0",
     "@types/jest": "^30.0.0",
     "@types/leaflet": "^1.9.19",
     "@types/leaflet.markercluster": "^1.5.5",
+    "eslint": "^9.38.0",
     "jest": "^30.0.5",
     "ts-jest": "^29.4.1",
     "typescript": "~5.8.3",
+    "typescript-eslint": "^8.46.2",
     "vite": "^7.0.0",
     "vite-plugin-static-copy": "^3.1.1"
   },
