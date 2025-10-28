@@ -290,29 +290,61 @@ function getBearing(from: L.LatLng, to: L.LatLng): number {
     return (toDeg(brng) + 360) % 360; // Normalize to 0-360
 }
 
+/*
+// Helper to find waypoint marker at same location
+function findWaypointAtLocation(lat: number, lon: number, threshold: number = 1): MarkerType | undefined {
+    const searchPoint = L.latLng(lat, lon);
+    return waypointGroup.getLayers().find(layer => {
+        const m = layer as MarkerType;
+        const pos = m.getLatLng();
+        return searchPoint.distanceTo(pos) <= threshold;  // threshold in meters
+    }) as MarkerType | undefined;
+}
+*/
+
 function preparePopupContent(data: WaypointDataType, solverCodeInHtml: string, distance: number, bearing: number): string {
-    const moreInfo = data.cacheInfo ? `
-<details style="margin-top:4px;">
-    <summary>More info</summary>
-    <div style="margin-top:4px;">
-        <div style="margin:0;max-height:120px;overflow:auto;border:1px solid #ccc;padding:4px;background:#fafafa;">
-            ${data.cacheInfo}${solverCodeInHtml}
+    let moreInfo = '';
+ 
+    if (data.cacheInfo) {
+       moreInfo =  `
+    <details style="margin-top:4px;">
+        <summary>More info</summary>
+        <div style="margin-top:4px;">
+            <div style="margin:0;max-height:120px;overflow:auto;border:1px solid #ccc;padding:4px;background:#fafafa;">
+                ${data.cacheInfo}${solverCodeInHtml}
+            </div>
         </div>
-    </div>
-</details>` : '';
+    </details>`;
+    } else if (data.type === 'Solver' && selectedMarker) {
+        const searchPoint = L.latLng(data.lat, data.lon);
+        const threshold = 1; // threshold in meters
+        if (searchPoint.distanceTo(selectedMarker.getLatLng()) <= threshold) {
+            const wpPopupContent = popup.getContent();
+            moreInfo =  `
+    <details style="margin-top:4px;">
+        <summary>Marker ${selectedMarker.waypointName}</summary>
+        <div style="margin-top:4px;">
+            <div style="margin:0;max-height:120px;overflow:auto;border:1px solid #ccc;padding:4px;background:#fafafa;">
+                ${wpPopupContent}
+            </div>
+        </div>
+    </details>`;
+        }
+
+    }
 
     const dmm = position2dmm(data.lat, data.lon);
     const desc = insertNewlineAtLastMatch(insertNewlineAtLastMatch(data.desc, ' by ', true), ',', false);
     const distanceStr = distance >= 0 ? `<br>Distance: ${formatDistance(distance)} ${getDirection(bearing)} (${bearing.toFixed(0)}°)` : '';
     const name = data.name;
-    const nanmeStr = name.startsWith("GC") ? `<a href="https://coord.info/${name}" target="_blank">${name}</a>` : name;
-    const popupContent = `
-<strong>${nanmeStr}</strong><br>
+    const nameStr = name.startsWith("GC") ? `<a href="https://coord.info/${name}" target="_blank">${name}</a>` : name;
+    
+    return `
+<strong>${nameStr}</strong><br>
 <span>${desc}</span><br>
-<small>${dmm}${distanceStr}</small><br>
+<small>${dmm}${distanceStr}</small>
 ${moreInfo}
 `;
-    return popupContent;
 }
 
 function getWaypointFromLocalStorage(key: string): WaypointDataType | undefined {
@@ -390,7 +422,8 @@ function setWaypointInfoHtml(html: string): void {
 
 function parseSolverCode(input: string, variables: Record<string, string | number>) {
     if (input.includes('\u2013')) {
-        console.warn("strange '-' found: '\u2013'. Replacing.");
+        console.warn("strange '-' found: '\u2013'.");
+        //console.warn("strange '-' found: '\u2013'. Replacing.");
         //input = input.replaceAll('\u2013', '-');
     }
 
@@ -436,13 +469,12 @@ function prepareSolverMarkersData(solverPoints: [string, string | number][]) {
             lat: latLon.getLat(),
             lon: latLon.getLng(),
             type: "Solver",
-            desc: '',
+            desc: latLon.getComment(),
             cacheInfo: '',
             solverCode: ''
         }
     });
     return markersData;
-    // TODO: a computed $GCxxx marker can overlay the GCxxx marker. How to access GCxxx marker?
 }
 
 let selectedMarker: MarkerType | undefined = undefined;
