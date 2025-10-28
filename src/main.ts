@@ -59,8 +59,8 @@ const solverPopup = L.popup();
 // Marker pool for reuse
 const markerPool: MarkerType[] = [];
 
-function asyncDelay(fn: () => void, timeout: number): Promise<number> {
-    return (async () => {
+function asyncDelay(fn: () => void, timeout: number) {
+    (() => {
         const timerId = window.setTimeout(fn, timeout);
         return timerId;
     })();
@@ -70,11 +70,11 @@ function deleteAllItems(items: Record<string, unknown>) {
     Object.keys(items).forEach(key => delete items[key]);
 }
 
-function debounce(fn: (...args: any[]) => void, delay: number) {
+function debounce(fn: (e: Event) => void, delay: number) {
     let timeoutId: number | undefined;
-    return (...args: any[]) => {
+    return (e: Event) => {
         clearTimeout(timeoutId);
-        timeoutId = window.setTimeout(() => fn(...args), delay);
+        timeoutId = window.setTimeout(() => fn(e), delay);
     };
 }
 
@@ -158,7 +158,7 @@ function renderMarkers(markersData: WaypointDataType[], keepView: boolean): void
     if (markersData.length > 0) {
         markersData.forEach(data => {
             const marker = getPooledMarker(data.lat, data.lon, getIcon(data.type), data.name);
-            waypointGroup!.addLayer(marker);
+            waypointGroup.addLayer(marker);
         });
         waypointGroup.addTo(map);
         if (!keepView) {
@@ -319,7 +319,7 @@ function preparePopupContent(data: WaypointDataType, solverCodeInHtml: string, d
         const searchPoint = L.latLng(data.lat, data.lon);
         const threshold = 1; // threshold in meters
         if (searchPoint.distanceTo(selectedMarker.getLatLng()) <= threshold) {
-            const wpPopupContent = popup.getContent();
+            const wpPopupContent = popup.getContent() as string;
             moreInfo =  `
     <details style="margin-top:4px;">
         <summary>Marker ${selectedMarker.waypointName}</summary>
@@ -350,15 +350,15 @@ ${moreInfo}
 function getWaypointFromLocalStorage(key: string): WaypointDataType | undefined {
     const storedData = window.localStorage.getItem(key);
     if (storedData) {
-        const data = JSON.parse(storedData) as any;
+        const data = JSON.parse(storedData) as Partial<WaypointDataType>;
         const wp: WaypointDataType = {
-            name: data.name,
+            name: data.name || '',
             lat: Number(data.lat) || 0,
             lon: Number(data.lon) || 0,
             type: data.type || '',
             desc: data.desc || '',
             cacheInfo: data.cacheInfo || '',
-            solverCode: data.solverCode,
+            solverCode: data.solverCode || '',
             solverCodeEdited: data.solverCodeEdited,
         };
         return wp;
@@ -712,7 +712,7 @@ async function onFileInputChange(event: Event): Promise<void> {
     console.log(`Processed in ${endTime - startTime} ms`);
 }
 
-function onEditButtonClick(_event: Event) { // eslint-disable-line @typescript-eslint/no-unused-vars
+function onEditButtonClick() {
     if (!selectedMarker) {
         console.error("No marker selected.");
         return;
@@ -728,7 +728,7 @@ function onEditButtonClick(_event: Event) { // eslint-disable-line @typescript-e
     // no cancel?
 }
 
-function onSaveButtonClick(_event: Event) { // eslint-disable-line @typescript-eslint/no-unused-vars
+function onSaveButtonClick() {
     if (!selectedMarker) {
         console.error("No marker selected.");
         return;
@@ -753,7 +753,7 @@ function onSaveButtonClick(_event: Event) { // eslint-disable-line @typescript-e
     setButtonDisabled('cancelButton', true);
 }
 
-function onCancelButtonClick(_event: Event) { // eslint-disable-line @typescript-eslint/no-unused-vars
+function onCancelButtonClick() {
     if (!selectedMarker) {
         console.error("No marker selected.");
         return;
@@ -762,17 +762,19 @@ function onCancelButtonClick(_event: Event) { // eslint-disable-line @typescript
     waypointInfo.setAttribute('contenteditable', "false");
     selectMarker(selectedMarker);
     setButtonDisabled('editButton', false);
-    //setButtonDisabled('saveButton', true);
     setButtonDisabled('cancelButton', true);
 }
 
+
+function getMarkerFromPopup(popup: L.Popup) {
+    return (popup as L.Popup & { _source: MarkerType })._source; // fast hack
+}
 
 // *** start location service
 
 function locationShowPosition(position: GeolocationPosition) {
     const latitude = position.coords.latitude;
     const longitude = position.coords.longitude;
-    //console.log(`DEBUG: Latitude: ${latitude}, Longitude: ${longitude}`);
     const oldLocation = locationMarker.getLatLng();
     const isInitialLocation = oldLocation.lat === 0 && oldLocation.lng === 0;
     const dmm = position2dmm(latitude, longitude);
@@ -789,7 +791,7 @@ function locationShowPosition(position: GeolocationPosition) {
     }
 
     if (popup.isOpen()) {
-        const marker = (popup as any)._source as MarkerType; // TTT: fast hack
+        const marker = getMarkerFromPopup(popup);
         const data = waypointDataMap[marker.waypointName];
         const currentLatLng = locationMarker.getLatLng();
         const distance = marker.getLatLng().distanceTo(currentLatLng);
@@ -840,7 +842,7 @@ function onShowLocationInputChange(event: Event): void {
         locationMarker.remove();
         locationMarker.setLatLng([0, 0]);
         if (popup.isOpen()) { // remove distance from popup...
-            const marker = (popup as any)._source as MarkerType; // TTT: fast hack
+            const marker = getMarkerFromPopup(popup);
             const data = waypointDataMap[marker.waypointName];
             const popupContent = preparePopupContent(data, '', -1, -1); // no distance and bearing
             popup.setContent(popupContent);
@@ -887,7 +889,7 @@ async function loadScriptOrStyle(script: HTMLScriptElement | HTMLLinkElement): P
             if (type === "load") {
                 resolve(key);
             } else {
-                reject(`Loading failed for ${key}`);
+                reject(new Error(`Loading failed for ${key}`));
             }
         };
         script.addEventListener("load", onScriptLoad, false);
@@ -970,7 +972,7 @@ function debugRedirectConsoleToWaypointInfo() {
 
     (['error', 'warn', 'log', 'debug'] as const).forEach(method => {
         const orig = console[method];
-        console[method] = (...args: any[]) => {
+        console[method] = (...args: unknown[]) => {
             orig(...args);
             waypointInfo.innerHTML += `<span style="color:${colors[method]}">${args.join(' ')}</span><br>`;
         };
@@ -1000,7 +1002,7 @@ function main(): void {
     solverGroup.bindPopup(solverPopup);
 
     const fileInput = document.getElementById('fileInput') as HTMLInputElement;
-    fileInput.addEventListener('change', onFileInputChange);
+    fileInput.addEventListener('change', () => onFileInputChange);
 
     const waypointSearch = document.getElementById('waypointSearch') as HTMLInputElement;
     waypointSearch.addEventListener('input', debounce((e) => {
@@ -1013,7 +1015,7 @@ function main(): void {
     }
 
     const waypointSearchClear = document.getElementById('waypointSearchClear') as HTMLButtonElement;
-    waypointSearchClear.addEventListener('click', (_e) => { // eslint-disable-line @typescript-eslint/no-unused-vars
+    waypointSearchClear.addEventListener('click', () => {
         waypointSearch.value = '';
         filterWaypoints(waypointSearch.value);
     });
@@ -1040,15 +1042,11 @@ function main(): void {
 
     polylineGroup.addTo(map);
 
-    asyncDelay(async () => {
+    asyncDelay(() => {
         if (config.file) {
             const scriptName = config.file;
             const key = config.file;
-            try {
-                await loadScript(scriptName, key);
-            } catch (e) {
-                console.error(e);
-            }
+            loadScript(scriptName, key).catch((e) => { console.error(e) });
         } else {
             loadWaypointsFromLocalStorage();
             const waypointSearch = document.getElementById('waypointSearch') as HTMLInputElement;

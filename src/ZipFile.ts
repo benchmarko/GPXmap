@@ -179,11 +179,11 @@ export class ZipFile {
     }
 
     private static getUint16(data: Uint8Array, i: number): number {
-        return ((data[i + 1]) << 8) | data[i]; // eslint-disable-line no-bitwise
+        return ((data[i + 1]) << 8) | data[i];
     }
 
     private static getUint32(data: Uint8Array, i: number): number {
-        return (data[i + 3] << 24) | (data[i + 2] << 16) | (data[i + 1] << 8) | data[i]; // eslint-disable-line no-bitwise
+        return (data[i + 3] << 24) | (data[i + 2] << 16) | (data[i + 1] << 8) | data[i];
     }
 
     private readAsUTF8(offset: number, len: number): string {
@@ -290,7 +290,7 @@ export class ZipFile {
             const dostime = cdfh.modificationTime;
 
             // year, month, day, hour, minute, second
-            cdfh.timestamp = new Date(((dostime >> 25) & 0x7F) + 1980, ((dostime >> 21) & 0x0F) - 1, (dostime >> 16) & 0x1F, (dostime >> 11) & 0x1F, (dostime >> 5) & 0x3F, (dostime & 0x1F) << 1).getTime(); // eslint-disable-line no-bitwise
+            cdfh.timestamp = new Date(((dostime >> 25) & 0x7F) + 1980, ((dostime >> 21) & 0x0F) - 1, (dostime >> 16) & 0x1F, (dostime >> 11) & 0x1F, (dostime >> 5) & 0x3F, (dostime & 0x1F) << 1).getTime();
 
             // local file header... much more info
             if (ZipFile.getUint32(data, cdfh.localOffset) !== ZipConstants.lfhSignature) {
@@ -324,7 +324,7 @@ export class ZipFile {
         let left = 1;
 
         for (i = 1; i <= 0xF; i += 1) {
-            if ((left = (left << 1) - codes.count[i]) < 0) { // eslint-disable-line no-bitwise
+            if ((left = (left << 1) - codes.count[i]) < 0) {
                 return left;
             }
         }
@@ -370,13 +370,11 @@ export class ZipFile {
     }
 
     private inflate(data: Uint8Array, offset: number, compressedSize: number, finalSize: number): Uint8Array {
-        /* eslint-disable array-element-newline */
         const startLens = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258],
             lExt = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0],
             dists = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577],
             dExt = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13],
             dynamicTableOrder = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15],
-            /* eslint-enable array-element-newline */
             bufEnd = offset + compressedSize,
             outBuf = new Uint8Array(finalSize);
         let inCnt = offset, // read position
@@ -394,13 +392,13 @@ export class ZipFile {
                 if (inCnt === bufEnd) {
                     throw new Error(`Zip: inflate: Data overflow`);
                 }
-                out |= data[inCnt] << bitCnt; // eslint-disable-line no-bitwise
+                out |= data[inCnt] << bitCnt;
                 inCnt += 1;
                 bitCnt += 8;
             }
-            bitBuf = out >> need; // eslint-disable-line no-bitwise
+            bitBuf = out >> need;
             bitCnt -= need;
-            return out & ((1 << need) - 1); // eslint-disable-line no-bitwise
+            return out & ((1 << need) - 1);
         },
 
             fnDecode = function (codes: CodeType) {
@@ -409,7 +407,7 @@ export class ZipFile {
                     i = 0;
 
                 for (let j = 1; j <= 0xF; j += 1) {
-                    code |= fnBits(1); // eslint-disable-line no-bitwise
+                    code |= fnBits(1);
                     const count = codes.count[j];
 
                     if (code < first + count) {
@@ -417,8 +415,8 @@ export class ZipFile {
                     }
                     i += count;
                     first += count;
-                    first <<= 1; // eslint-disable-line no-bitwise
-                    code <<= 1; // eslint-disable-line no-bitwise
+                    first <<= 1;
+                    code <<= 1;
                 }
                 return null;
             },
@@ -434,7 +432,7 @@ export class ZipFile {
 
                 inCnt += 2;
 
-                if (data[inCnt] !== (~len & 0xFF) || data[inCnt + 1] !== ((~len >> 8) & 0xFF)) { // eslint-disable-line no-bitwise
+                if (data[inCnt] !== (~len & 0xFF) || data[inCnt + 1] !== ((~len >> 8) & 0xFF)) {
                     throw new Error(`Zip: inflate: Bad length at pos ${inCnt}`);
                 }
                 inCnt += 2;
@@ -475,7 +473,6 @@ export class ZipFile {
                 for (i = 0; i < nLen + nDist;) {
                     let symbol = fnDecode(lenCode) as number; // TTT
 
-                    /* eslint-disable max-depth */
                     if (symbol < 16) {
                         lens[i] = symbol;
                         i += 1;
@@ -503,7 +500,6 @@ export class ZipFile {
                             i += 1;
                         }
                     }
-                    /* eslint-enable max-depth */
                 }
                 const err1 = ZipFile.fnInflateConstruct(lenCode, lens, nLen),
                     err2 = ZipFile.fnInflateConstruct(distCode, lens.slice(nLen), nDist);
@@ -617,7 +613,7 @@ export class ZipFile {
         // check for the Local File Header (LFH) signature at the beginning of the file (we ignore that there can be any preceding data)
         const lfhSignature = ZipConstants.lfhSignature;
         const i = 0; // we only check the first 4 bytes
-        const firstFourBytes = (data[i + 3] << 24) | (data[i + 2] << 16) | (data[i + 1] << 8) | data[i]; // eslint-disable-line no-bitwise
+        const firstFourBytes = (data[i + 3] << 24) | (data[i + 2] << 16) | (data[i + 1] << 8) | data[i];
         if (firstFourBytes !== lfhSignature) {
             return false; // does not start with the Local File Header signature
         }
