@@ -1,10 +1,10 @@
-import ScriptParser, { type VariableAccessType } from './ScriptParser';
+import ScriptParser, { type ValueType, type ValueTypeWithNull, type VariableAccessType } from './ScriptParser';
 
 function getVariableAccess(vars = {}) {
     const variableAccess: VariableAccessType = {
         vars,
         get: (name: string) => variableAccess.vars[name],
-        set: (name: string, value: string | number) => {
+        set: (name: string, value: ReturnType<VariableAccessType["get"]>) => {
             variableAccess.vars[name] = value;
         }
     };
@@ -24,7 +24,7 @@ describe('ScriptParser', () => {
             expect(tokens).toEqual([
                 { type: 'number', value: "42", pos: 0 },
                 { type: 'number', value: "3.14", pos: 3 },
-                { type: '(end)', value: 0, pos: 7 }
+                { type: '(end)', value: "", pos: 7 }
             ]);
         });
 
@@ -32,7 +32,7 @@ describe('ScriptParser', () => {
             const tokens = parser.lex('"hello"');
             expect(tokens).toEqual([
                 { type: 'string', value: 'hello', pos: 1 },
-                { type: '(end)', value: 0, pos: 7 }
+                { type: '(end)', value: "", pos: 7 }
             ]);
         });
 
@@ -40,7 +40,7 @@ describe('ScriptParser', () => {
             const tokens = parser.lex("'world'");
             expect(tokens).toEqual([
                 { type: 'string', value: 'world', pos: 1 },
-                { type: '(end)', value: 0, pos: 7 }
+                { type: '(end)', value: "", pos: 7 }
             ]);
         });
 
@@ -48,11 +48,11 @@ describe('ScriptParser', () => {
             const tokens = parser.lex('1 + 2 * 3');
             expect(tokens).toEqual([
                 { type: 'number', value: "1", pos: 0 },
-                { type: '+', value: 0, pos: 2 },
+                { type: '+', value: "", pos: 2 },
                 { type: 'number', value: "2", pos: 4 },
-                { type: '*', value: 0, pos: 6 },
+                { type: '*', value: "", pos: 6 },
                 { type: 'number', value: "3", pos: 8 },
-                { type: '(end)', value: 0, pos: 9 }
+                { type: '(end)', value: "", pos: 9 }
             ]);
         });
 
@@ -61,7 +61,7 @@ describe('ScriptParser', () => {
             expect(tokens).toEqual([
                 { type: 'number', value: "42", pos: 0 },
                 { type: 'number', value: "43", pos: 23 },
-                { type: '(end)', value: 0, pos: 25 }
+                { type: '(end)', value: "", pos: 25 }
             ]);
         });
 
@@ -118,7 +118,7 @@ describe('ScriptParser', () => {
         const variableAccess: VariableAccessType = {
             vars: {},
             get: (name: string) => variableAccess.vars[name],
-            set: (name: string, value: string | number) => {
+            set: (name: string, value: ValueType) => {
                 variableAccess.vars[name] = value;
             }
         };
@@ -133,7 +133,7 @@ describe('ScriptParser', () => {
             const tokens = parser.lex('abs(-5)');
             const tree = parser.parse(tokens);
             const result = parser.evaluate(tree, variableAccess, {
-                abs: Math.abs
+                abs: (x: ValueTypeWithNull) => Math.abs(Number(x))
             });
             expect(result).toBe("5");
         });

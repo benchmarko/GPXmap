@@ -23,13 +23,19 @@ interface SymbolType {
 	led?: ParseFunction // left denotative function
 }
 
+export type ValueType = string | number | boolean;
+
+export type ValueTypeWithNull = ValueType | null;
+
 export type VariableAccessType = {
-	vars: Record<string, string | number>,
-	get: (name: string) => string | number,
-	set: (name: string, value: string | number) => void
+	vars: Record<string, ValueType>,
+	get: (name: string) => ValueType,
+	set: (name: string, value: ValueType) => void
 }
 
-type Functions = Record<string, (...args: any[]) => any>;
+type OperatorFunctionType = (a: ValueTypeWithNull, b: ValueTypeWithNull) => ValueTypeWithNull;
+
+type Functions = Record<string, (...args: ValueTypeWithNull[]) => ValueTypeWithNull>;
 
 const functionList = "_concat abs acos asin atan bearing cb center cls cos count cp ct d2r deg distance encode format goto ic instr int lc len mid mod pc project r2d rad replace reverse rot13 show skeleton sin sqrt sval tan uc val".split(" ");
 const commandList = "endif if stop then".split(" ");
@@ -131,7 +137,7 @@ export default class ScriptParser {
 			} while (fn(sChar));
 			return sToken2;
 		};
-		const addToken = (type: string, value: any, iPos: number) => {
+		const addToken = (type: string, value: string, iPos: number) => {
 			aTokens.push({ type, value, pos: iPos });
 		};
 
@@ -152,7 +158,7 @@ export default class ScriptParser {
 					op += nextChar;
 					advance();
 				}
-				addToken(op, 0, iStartPos);
+				addToken(op, "", iStartPos);
 				sChar = advance();
 			} else if (isDigit(sChar)) {
 				sToken = advanceWhile(isDigit);
@@ -183,7 +189,7 @@ export default class ScriptParser {
 			} else if (isIdentifier(sChar)) {
 				sToken = advanceWhile(isIdentifier);
 				if (keywordsMap[sToken.toLowerCase()]) {
-					addToken(sToken.toLowerCase(), 0, iStartPos);
+					addToken(sToken.toLowerCase(), "", iStartPos);
 				} else {
 					addToken("identifier", sToken, iStartPos);
 				}
@@ -199,7 +205,7 @@ export default class ScriptParser {
 				throw new ScriptParser.ErrorObject("Unrecognized token", sChar, iStartPos);
 			}
 		}
-		addToken("(end)", 0, iIndex);
+		addToken("(end)", "", iIndex);
 		return aTokens;
 	}
 
@@ -281,7 +287,7 @@ export default class ScriptParser {
 				return {
 					type: id,
 					left: left,
-					right: expression(rbp!)
+					right: expression(rbp) // rbp!
 					//value: "",
 					//pos: 0
 				} as ParseNode;
@@ -484,27 +490,27 @@ export default class ScriptParser {
 	}
 
 	evaluate(parseTree: ParseNode[], variableAccess: VariableAccessType, functions: Functions): string {
-		const that = this;
-		const operators: Record<string, any> = {
-			"+": (a: any, b: any) => Number(a) + Number(b),
-			"-": (a: any, b?: any) => (b === undefined ? -a : a - b),
-			"*": (a: number, b: number) => a * b,
-			"/": (a: number, b: number) => a / b,
-			"%": (a: any, b: any) => a % b,
-			"^": (a: any, b: any) => Math.pow(a, b),
+		const that = this; // eslint-disable-line @typescript-eslint/no-this-alias
+		const operators: Record<string, OperatorFunctionType> = {
+			"+": (a: ValueTypeWithNull, b: ValueTypeWithNull) => Number(a) + Number(b),
+			"-": (a: ValueTypeWithNull, b?: ValueTypeWithNull) => (b === null ? -Number(a) : Number(a) - Number(b)),
+			"*": (a: ValueTypeWithNull, b: ValueTypeWithNull) => Number(a) * Number(b), // (a: number, b: number)
+			"/": (a: ValueTypeWithNull, b: ValueTypeWithNull) => Number(a) / Number(b), // (a: number, b: number)
+			"%": (a: ValueTypeWithNull, b: ValueTypeWithNull) => Number(a) % Number(b),
+			"^": (a: ValueTypeWithNull, b: ValueTypeWithNull) => Math.pow(Number(a), Number(b)),
 
-			"=": (a: any, b: any) => String(a) === String(b),
-			"<>": (a: any, b: any) => String(a) !== String(b),
-			"<": (a: any, b: any) => String(a) < String(b),
-			">": (a: any, b: any) => String(a) > String(b),
-			"<=": (a: any, b: any) => String(a) <= String(b),
-			">=": (a: any, b: any) => String(a) >= String(b)
+			"=": (a: ValueTypeWithNull, b: ValueTypeWithNull) => String(a) === String(b),
+			"<>": (a: ValueTypeWithNull, b: ValueTypeWithNull) => String(a) !== String(b),
+			"<": (a: ValueTypeWithNull, b: ValueTypeWithNull) => String(a) < String(b),
+			">": (a: ValueTypeWithNull, b: ValueTypeWithNull) => String(a) > String(b),
+			"<=": (a: ValueTypeWithNull, b: ValueTypeWithNull) => String(a) <= String(b),
+			">=": (a: ValueTypeWithNull, b: ValueTypeWithNull) => String(a) >= String(b)
 		};
 		const mFunctions = functions;
 
 		const output: string[] = [];
 
-		const checkArgs = (name: string, aArgs: any[], iPos: number) => {
+		const checkArgs = (name: string, aArgs: ValueTypeWithNull[], iPos: number) => {
 			const oFunction = mFunctions[name];
 
 			if (oFunction.length !== aArgs.length) {
@@ -518,7 +524,8 @@ export default class ScriptParser {
 						return;
 					}
 				}
-				throw new ScriptParser.ErrorObject("Wrong number of arguments for function", name, iPos);
+				console.warn("WARN: oFunction=", String(oFunction));
+				throw new ScriptParser.ErrorObject(`Wrong number of arguments (${oFunction.length}, ${aArgs.length}) for function`, name, iPos);
 			}
 		};
 
@@ -528,21 +535,21 @@ export default class ScriptParser {
 		const fnAdaptVariableName = (sName: string) =>
 			that.options.ignoreVarCase ? sName.toLowerCase() : sName;
 
-		const parseNode = (node: ParseNode): string | number | null => {
-			let value: string | number | null;
+		const parseNode = (node: ParseNode): ValueTypeWithNull => {
+			let value: ValueTypeWithNull;
 			let sName: string;
 			if (node.type === "string") {
-				value = node.value as string;
+				value = node.value; //as string
 			} else if (node.type === "number") {
-				value = parseFloat(node.value as string);
+				value = parseFloat(node.value); //as string
 			} else if (operators[node.type]) {
 				if (node.left) {
 					value = operators[node.type](parseNode(node.left), parseNode(node.right!));
 				} else {
-					value = operators[node.type](parseNode(node.right!));
+					value = operators[node.type](parseNode(node.right!), null);
 				}
 			} else if (node.type === "identifier") {
-				sName = fnAdaptVariableName(node.value as string);
+				sName = fnAdaptVariableName(node.value); //as string
 				value = variableAccess.get(sName);
 				if (value === undefined) {
 					//throw new ScriptParser.ErrorObject("Variable is undefined", String(node.value), node.pos);
@@ -584,7 +591,7 @@ export default class ScriptParser {
 			} else if (node.type === "stop") {
 				value = null;
 			} else if (keywordsMap[node.type]) { // "if" and "stop" are already handled
-				const aNodeArgs = [];
+				const aNodeArgs: ValueTypeWithNull[] = [];
 				for (let i = 0; i < node.args!.length; i += 1) {
 					aNodeArgs[i] = parseNode(node.args![i]);
 				}
@@ -599,7 +606,7 @@ export default class ScriptParser {
 				value = numFormat(String(value), node.value);
 			} else {
 				console.error("parseNode node=%o unknown type=" + node.type, node);
-				value = String(node);
+				value = String(node); // eslint-disable-line @typescript-eslint/no-base-to-string
 			}
 			return value;
 		};
@@ -624,7 +631,7 @@ export default class ScriptParser {
 	}
 
 	calculate(input: string, variableAccess: VariableAccessType): string {
-		const that = this;
+		const that = this; // eslint-disable-line @typescript-eslint/no-this-alias
 		const mFunctions = {
 			// _concat(s1, s2, ...) concatenate strings (called by operator [..] ); varargs
 			_concat_optionalArgs: () => Number.POSITIVE_INFINITY,
@@ -632,7 +639,7 @@ export default class ScriptParser {
 
 			//
 
-			abs: Math.abs,
+			abs: (x: number): number => Math.abs(x), //abs: Math.abs,
 
 			acos: (x: number): number => toDegrees(Math.acos(x)),
 
@@ -665,6 +672,7 @@ export default class ScriptParser {
 			// center, zentrum
 			center: () => {
 				console.log("center() ignored.");
+				return "";
 			},
 
 			cls: () => null, // clear output trigger
@@ -714,6 +722,7 @@ export default class ScriptParser {
 			// deg() switch do degrees mode (default, ignored, we always use degrees)
 			deg: () => {
 				console.log("deg() ignored."); //TTT
+				return "";
 			},
 
 			// distance(w1, w2) distance between w1 and w2 in meters
@@ -788,6 +797,7 @@ export default class ScriptParser {
 			// pc, pz, profilecenter, profilezentrum
 			pc: () => {
 				console.warn("pc ignored.");
+				return "";
 			},
 
 			// project(w1, bearing, distance) project from w1 bearing degrees and distance meters
@@ -803,6 +813,7 @@ export default class ScriptParser {
 			// rad() switch do radians mode (not supported, we always use degrees)
 			rad: () => {
 				console.warn("rad ignored.");
+				return "";
 			},
 
 			// replace(s, s1, r1): replace all occurrences of s1 in s by r1
@@ -824,12 +835,14 @@ export default class ScriptParser {
 
 			show: () => {
 				console.warn("show ignored.");
+				return "";
 			},
 
 			sin: (deg: number): number => Math.sin(toRadians(deg)),
 
 			skeleton: () => {
 				console.warn("skeleton ignored.");
+				return "";
 			},
 
 			sqrt: Math.sqrt,
@@ -882,11 +895,11 @@ export default class ScriptParser {
 			// getconst; PI, E
 			// parse(s)
 			// assert(a, b)
-		} as Functions;
+		}
 
 		const tokens = this.lex(input);
 		const parseTree = this.parse(tokens);
-		const output = this.evaluate(parseTree, variableAccess, mFunctions);
+		const output = this.evaluate(parseTree, variableAccess, mFunctions as Functions);
 		return output;
 	}
 }

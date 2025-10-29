@@ -4,7 +4,7 @@ import 'leaflet.markercluster';
 import type { FeatureGroup, MarkerClusterGroup } from 'leaflet';
 
 import LatLng from "./LatLng";
-import ScriptParser, { type VariableAccessType } from './ScriptParser';
+import ScriptParser, { type ValueType, type VariableAccessType } from './ScriptParser';
 import { ZipFile } from "./ZipFile";
 
 declare global {
@@ -420,7 +420,7 @@ function setWaypointInfoHtml(html: string): void {
     waypointInfo.innerHTML = html;
 }
 
-function parseSolverCode(input: string, variables: Record<string, string | number>) {
+function parseSolverCode(input: string, variables: Record<string, ValueType>) {
     if (input.includes('\u2013')) {
         console.warn("strange '-' found: '\u2013'.");
         //console.warn("strange '-' found: '\u2013'. Replacing.");
@@ -442,7 +442,7 @@ function parseSolverCode(input: string, variables: Record<string, string | numbe
             }
             return value;
         },
-        set: (name: string, value: string | number) => {
+        set: (name: string, value: ValueType) => {
             variables[name] = value;
         } 
     }
@@ -1002,7 +1002,7 @@ function main(): void {
     solverGroup.bindPopup(solverPopup);
 
     const fileInput = document.getElementById('fileInput') as HTMLInputElement;
-    fileInput.addEventListener('change', () => onFileInputChange);
+    fileInput.addEventListener('change', (e: Event) => void onFileInputChange(e));
 
     const waypointSearch = document.getElementById('waypointSearch') as HTMLInputElement;
     waypointSearch.addEventListener('input', debounce((e) => {
