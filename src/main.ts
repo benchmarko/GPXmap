@@ -649,7 +649,7 @@ function parseGpxFile(text: string, name: string): string {
     return `Processed file ${name} with ${wpts.length} waypoints${overwrittenStr}.`;
 }
 
-// Handle file upload
+// Handle file upload (or file drop on map)
 async function onFileInputChange(event: Event): Promise<void> {
     let infoHtml = '';
     setWaypointInfoHtml(infoHtml);
@@ -662,17 +662,24 @@ async function onFileInputChange(event: Event): Promise<void> {
         popup.close();
     }
     const startTime = Date.now();
-    const inputElement = event.target as HTMLInputElement;
-    if (!inputElement.files || inputElement.files.length === 0) {
+
+    // dataTransfer for drag&drop (with event.type="drop"), target.files for file input 
+    const dataTransfer = (event as DragEvent).dataTransfer;
+	const files = dataTransfer ? dataTransfer.files : (event.target as HTMLInputElement).files;
+    const inputElement = !dataTransfer ? (event.target as HTMLInputElement) : null;
+
+    if (!files || files.length === 0) {
         return;
     }
 
     deleteAllItems(waypointDataMap); // Reset waypoint data map
     filterWaypoints("");
 
-    inputElement.style.color = '';
+    if (inputElement) {
+        inputElement.style.color = '';
+    }
 
-    for (const file of inputElement.files) {
+    for (const file of files) {
         try {
             if (file.type === 'application/x-zip-compressed' || file.type === 'application/zip') {
                 // on Mac OS it is "application/zip"
@@ -689,10 +696,6 @@ async function onFileInputChange(event: Event): Promise<void> {
                         fileName = result[1];
                         text = result[2];
                         addItem(fileName, text);
-                    // Probably unsecure solution:
-                    //if (/GPXmap\.addItem\(/.exec(text)) {
-                    //    const fn = new Function(text); // eslint-disable-line @typescript-eslint/no-implied-eval
-                    //    fn(); // eslint-disable-line @typescript-eslint/no-unsafe-call
                     } else {
                         throw new Error("onFileInputChange: GPXmap.addItem not found in JS file " + fileName);
                     }
@@ -716,7 +719,9 @@ async function onFileInputChange(event: Event): Promise<void> {
             const errorMsg = e instanceof Error ? e.message : String(e);
             console.error(errorMsg);
             infoHtml += `<span style="color: red">${errorMsg}</span><br>\n`;
-            inputElement.style.color = 'red';
+            if (inputElement) {
+                inputElement.style.color = 'red';
+            }
         }
     }
     setWaypointInfoHtml(getWaypointInfoHtml() + infoHtml); // add info (in debuggung mode there could be already some output)
@@ -727,6 +732,7 @@ async function onFileInputChange(event: Event): Promise<void> {
     const endTime = Date.now();
     console.log(`Processed in ${endTime - startTime} ms`);
 }
+
 
 function onEditButtonClick() {
     if (!selectedMarker) {
@@ -781,6 +787,13 @@ function onCancelButtonClick() {
     setButtonDisabled('cancelButton', true);
 }
 
+function onMapDragover(ev: DragEvent) {
+    ev.stopPropagation();
+    ev.preventDefault();
+    if (ev.dataTransfer !== null) {
+        ev.dataTransfer.dropEffect = "copy"; // explicitly show this is a copy
+    }
+}
 
 function getMarkerFromPopup(popup: L.Popup) {
     return (popup as L.Popup & { _source: MarkerType })._source; // fast hack
@@ -1019,6 +1032,15 @@ function main(): void {
 
     const fileInput = document.getElementById('fileInput') as HTMLInputElement;
     fileInput.addEventListener('change', (e: Event) => void onFileInputChange(e));
+
+    const mapElement = document.getElementById('map') as HTMLDivElement;
+    mapElement.addEventListener("dragover", onMapDragover, false);
+    mapElement.addEventListener("drop", (ev: Event) => {
+        ev.stopPropagation();
+        ev.preventDefault(); // required for FireFox
+        void onFileInputChange(ev);
+        fileInput.style.color = 'lightgrey'; // outdated
+    }, false); // onMapDrop
 
     const waypointSearch = document.getElementById('waypointSearch') as HTMLInputElement;
     waypointSearch.addEventListener('input', debounce((e) => {
