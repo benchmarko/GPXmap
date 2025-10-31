@@ -682,18 +682,34 @@ async function onFileInputChange(event: Event): Promise<void> {
             } else {
                 let fileName = file.name;
                 let text = await file.text();
-                if (fileName.endsWith('.b64')) {
-                    text = atob(text);
-                    fileName = fileName.slice(0, -4); // Remove .b64 suffix
-                }
-                if (fileName.endsWith('.zip')) {
-                    const binaryData = new Uint8Array(text.split('').map(c => c.charCodeAt(0)));
-                    const messages = processZipFile(binaryData, file.name);
-                    infoHtml += messages.map((message) => `<span>${message}</span><br>\n`).join('');
-                } else { //if (fileName.endsWith('.gpx')) {
-                    // Process GPX file
-                    const message = parseGpxFile(text, file.name);
-                    infoHtml += `<span>${message}</span><br>\n`;
+                if (file.type === 'text/javascript') {
+                    // We expect somewhere in the .js file: GPXmap.addItem("<filename>", `<content>`), maybe spanning multiple lines. Filename can also have extension, e.g. file.zip.b64
+                    const result = /GPXmap\.addItem\("([^"]+)", `\s*([^`]*)`\)/.exec(text);
+                    if (result) {
+                        fileName = result[1];
+                        text = result[2];
+                        addItem(fileName, text);
+                    // Probably unsecure solution:
+                    //if (/GPXmap\.addItem\(/.exec(text)) {
+                    //    const fn = new Function(text); // eslint-disable-line @typescript-eslint/no-implied-eval
+                    //    fn(); // eslint-disable-line @typescript-eslint/no-unsafe-call
+                    } else {
+                        throw new Error("onFileInputChange: GPXmap.addItem not found in JS file " + fileName);
+                    }
+                } else {
+                    if (fileName.endsWith('.b64')) { // assuming Basic64 encoding
+                        text = atob(text);
+                        fileName = fileName.slice(0, -4); // Remove .b64 suffix
+                    }
+                    if (fileName.endsWith('.zip')) {
+                        const binaryData = new Uint8Array(text.split('').map(c => c.charCodeAt(0)));
+                        const messages = processZipFile(binaryData, file.name);
+                        infoHtml += messages.map((message) => `<span>${message}</span><br>\n`).join('');
+                    } else { //if (fileName.endsWith('.gpx')) {
+                        // Process GPX file
+                        const message = parseGpxFile(text, file.name);
+                        infoHtml += `<span>${message}</span><br>\n`;
+                    }
                 }
             }
         } catch (e) {
