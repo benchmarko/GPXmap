@@ -4,7 +4,10 @@
 // Idea based on: https://github.com/frash23/jzsip/blob/master/jzsip.js (and Cpcemu: zip.cpp)
 // https://pkwaredownloads.blob.core.windows.net/pkware-general/Documentation/APPNOTE-6.3.9.TXT
 //
-interface ZipFileOptions {
+
+import { ZipCrypto } from "./ZipCrypto";
+
+export interface ZipFileOptions {
     data: Uint8Array
 }
 
@@ -82,11 +85,16 @@ export class ZipFile {
         this.setOptions(options, true);
     }
 
-    getOptions(): ZipFileOptions {
+    // Get current options
+    // Note: The data option is returned as is (no copy)
+    public getOptions(): ZipFileOptions {
         return this.options;
     }
 
-    setOptions(options: Partial<ZipFileOptions>, force: boolean): void {
+    // Set options
+    // If force is true, the ZIP directory is re-read even if the data option has not changed
+    // Note: The data option is used as is (no copy)
+    public setOptions(options: Partial<ZipFileOptions>, force: boolean): void {
         const currentData = this.options.data;
 
         Object.assign(this.options, options);
@@ -96,84 +104,16 @@ export class ZipFile {
         }
     }
 
-    // --- ZipCrypto implementation ---
-    // Make sure to use Math.imul for 32 bit unsigend! (https://matthewtolman.com/article/unsigned-integers-in-javascript)
-
-    private static createCrcTable(): Uint32Array {
-        const crcTable = new Uint32Array(256);
-        for (let i = 0; i < 256; i += 1) {
-            let c = i;
-            for (let j = 0; j < 8; j += 1) {
-                c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
-            }
-            crcTable[i] = c >>> 0;
-        }
-        return crcTable;
-    }
-
-    private static crcTable?: Uint32Array = undefined;
-
-    private static zipCryptoCrc32(crc: number, c: number) {
-        const crcTable = ZipFile.crcTable || (ZipFile.crcTable = ZipFile.createCrcTable());
-        return ((crc >>> 8) ^ crcTable[(crc ^ c) & 0xff]) >>> 0;
-    };
-
-    private static zipCryptoUpdateKeys(keys: number[], c: number): void {
-        keys[0] = ZipFile.zipCryptoCrc32(keys[0], c);
-        keys[1] = (keys[1] + (keys[0] & 0xff)) >>> 0;
-        keys[1] = (Math.imul(keys[1], 134775813) >>> 0) + 1 >>> 0;
-        keys[2] = ZipFile.zipCryptoCrc32(keys[2], (keys[1] >>> 24) & 0xff);
-    }
-
-    private static zipCryptoInitKeys(password: string): number[] {
-        const keys = [0x12345678, 0x23456789, 0x34567890];
-        for (let i = 0; i < password.length; i += 1) {
-            ZipFile.zipCryptoUpdateKeys(keys, password.charCodeAt(i));
-        }
-        return keys;
-    }
-
-    private static zipCryptoDecryptByte(keys: number[], c: number): number {
-        const temp = (keys[2] | 2) >>> 0;
-
-        const decrypted = c ^ ((Math.imul(temp, temp ^ 1) >>> 8) & 0xff);
-        ZipFile.zipCryptoUpdateKeys(keys, decrypted);
-        return decrypted;
-    }
-
-    private static zipCryptoDecrypt(data: Uint8Array, cdfh: CentralDirFileHeader, password: string): Uint8Array {
-        const keys = ZipFile.zipCryptoInitKeys(password);
-        const decryptedHeader = new Uint8Array(12);
-        for (let i = 0; i < 12; i += 1) {
-            const c = ZipFile.zipCryptoDecryptByte(keys, data[i]);
-            decryptedHeader[i] = c;
-        }
-
-        let checkByte: number;
-        if ((cdfh.flag & 0x8) !== 0) {
-            checkByte = (cdfh.modificationTime >> 8) & 0xff; // check MSB of the file time
-        } else {
-            checkByte = (cdfh.crc >> 24) & 0xff; // check MSB of CRC
-        }
-
-        if (decryptedHeader[11] !== checkByte) {
-            throw new Error("Zip: The password did not match.");
-        }
-
-        const out = new Uint8Array(data.length - 12);
-        for (let i = 12; i < data.length; i += 1) {
-            const c = ZipFile.zipCryptoDecryptByte(keys, data[i]);
-            out[i - 12] = c;
-        }
-        return out;
-    }
-    // --- ZipCrypto implementation end ---
-
-
-    getZipDirectory(): ZipDirectoryType {
+    // Get the ZIP directory (list of entries)
+    // Returns an object where the keys are the file names and the values are CentralDirFileHeader objects
+    // Note: Directories are also included in the list
+    public getZipDirectory(): ZipDirectoryType {
         return this.entryTable;
     }
 
+    // Convert Uint8Array to UTF-8 string
+    // Uses TextDecoder if available, otherwise a polyfill
+    // Note: The polyfill may be slow for large data
     public static convertUint8ArrayToUtf8(data: Uint8Array): string {
         return ZipFile.textDecoder.decode(data);
     }
@@ -579,6 +519,11 @@ export class ZipFile {
         return outBuf;
     }
 
+    // Read binary data of a file entry (decompressing and decrypting if needed)
+    // password is required for encrypted files
+    // Throws error if file not found, password missing or incorrect, or compression method not supported
+    // Returns Uint8Array with file data
+    // Note: Directories cannot be read (will throw "file not found" error)
     public readBinaryData(name: string, password?: string): Uint8Array {
         const data = this.data;
         const cdfh = this.entryTable[name];
@@ -586,7 +531,7 @@ export class ZipFile {
             throw new Error(`Zip: readBinaryData: File does not exist: ${name}`);
         }
 
-        const isEncrypted = cdfh.flag & 1;
+        const isEncrypted = ZipCrypto.isEncrypted(cdfh);
         console.log(`Zip: Extracting ${name}: compressedSize=${cdfh.compressedSize} size=${cdfh.size} compressionMethod=${cdfh.compressionMethod} encrypted=${isEncrypted}`);
 
         let fileData = data.subarray(cdfh.dataStart, cdfh.dataStart + cdfh.compressedSize);
@@ -594,7 +539,7 @@ export class ZipFile {
             if (!password) {
                 throw new Error(`Zip: Password required`);
             }
-            fileData = ZipFile.zipCryptoDecrypt(fileData, cdfh, password); // read encrypted data (includes 12-byte header)
+            fileData = ZipCrypto.decrypt(fileData, cdfh, password); // read encrypted data (includes 12-byte header)
         }
 
         if (cdfh.compressionMethod === 0) { // stored
@@ -606,6 +551,8 @@ export class ZipFile {
         return fileData;
     }
 
+    // Check if the data looks like a ZIP file
+    // (checks only for Local File Header signature at the beginning of the file)
     public static isProbablyZipFile(data: Uint8Array): boolean {
         if (data.length < 4) {
             return false; // too short to be a valid ZIP file
