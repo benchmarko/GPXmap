@@ -290,18 +290,6 @@ function getBearing(from: L.LatLng, to: L.LatLng): number {
     return (toDeg(brng) + 360) % 360; // Normalize to 0-360
 }
 
-/*
-// Helper to find waypoint marker at same location
-function findWaypointAtLocation(lat: number, lon: number, threshold: number = 1): MarkerType | undefined {
-    const searchPoint = L.latLng(lat, lon);
-    return waypointGroup.getLayers().find(layer => {
-        const m = layer as MarkerType;
-        const pos = m.getLatLng();
-        return searchPoint.distanceTo(pos) <= threshold;  // threshold in meters
-    }) as MarkerType | undefined;
-}
-*/
-
 function preparePopupContent(data: WaypointDataType, solverCodeInHtml: string, distance: number, bearing: number): string {
     let moreInfo = '';
  
@@ -423,8 +411,6 @@ function setWaypointInfoHtml(html: string): void {
 function parseSolverCode(input: string, variables: Record<string, ValueType>) {
     if (input.includes('\u2013')) {
         console.warn("strange '-' found: '\u2013'.");
-        //console.warn("strange '-' found: '\u2013'. Replacing.");
-        //input = input.replaceAll('\u2013', '-');
     }
 
     const variableAccess: VariableAccessType = {
@@ -689,7 +675,7 @@ async function onFileInputChange(event: Event): Promise<void> {
             } else {
                 let fileName = file.name;
                 let text = await file.text();
-                if (file.type === 'text/javascript') {
+                if (file.type === 'text/javascript' || file.type === 'application/x-javascript') { // FireFox and Safari use 'application/x-javascript'
                     // We expect somewhere in the .js file: GPXmap.addItem("<filename>", `<content>`), maybe spanning multiple lines. Filename can also have extension, e.g. file.zip.b64
                     const result = /GPXmap\.addItem\("([^"]+)", `\s*([^`]*)`\)/.exec(text);
                     if (result) {
