@@ -514,6 +514,13 @@ function selectMarker(marker: MarkerType): void {
 function selectSolverMarker(marker: MarkerType): void {
     // no not set selectedMarker, keep it
     const data = solverDataMap[marker.waypointName];
+    if (!data) {
+        console.error("selectSolverMarker: data not found for marker ", marker.waypointName);
+        solverPopup
+            .setLatLng(marker.getLatLng()) // use actual marker position for the popup position
+            .setContent(`<strong>${marker.waypointName}</strong><br><span style="color: red">Data not found!</span>`);
+        return;
+    }
 
     const currentLatLng = locationMarker.getLatLng();
     const isInitialLocation = currentLatLng.lat === 0 && currentLatLng.lng === 0;
@@ -530,9 +537,16 @@ function selectSolverMarker(marker: MarkerType): void {
         .setContent(popupContent);
 }
 
+function clearSolverLayers(): void {
+    if (map.hasLayer(solverGroup)) {
+        clearMarkersFromGroup(solverGroup);
+        map.removeLayer(solverGroup);
+        polylineGroup.clearLayers();
+    }
+}
+
 function onWaypointGroupClick(e: L.LeafletMouseEvent): void {
-    solverGroup.clearLayers();
-    polylineGroup.clearLayers();
+    clearSolverLayers();
     const marker = e.propagatedFrom as MarkerType;
     selectMarker(marker);
 }
@@ -657,6 +671,9 @@ async function onFileInputChange(event: Event): Promise<void> {
     if (popup.isOpen()) {
         popup.close();
     }
+    if (solverPopup.isOpen()) {
+        solverPopup.close();
+    }
     const startTime = Date.now();
 
     // dataTransfer for drag&drop (with event.type="drop"), target.files for file input 
@@ -669,6 +686,8 @@ async function onFileInputChange(event: Event): Promise<void> {
     }
 
     deleteAllItems(waypointDataMap); // Reset waypoint data map
+    deleteAllItems(solverDataMap); // Reset solver data map
+    clearSolverLayers();
     filterWaypoints("");
 
     if (inputElement) {
