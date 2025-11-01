@@ -304,9 +304,12 @@ function preparePopupContent(data: WaypointDataType, solverCodeInHtml: string, d
         </div>
     </details>`;
     } else if (data.type === 'Solver' && selectedMarker) {
+        // With markerCluster, the marker position may be different than the position in the data!
         const searchPoint = L.latLng(data.lat, data.lon);
         const threshold = 1; // threshold in meters
-        if (searchPoint.distanceTo(selectedMarker.getLatLng()) <= threshold) {
+        const mainData = waypointDataMap[selectedMarker.waypointName];
+        const mainLatLng = mainData ? L.latLng(mainData.lat, mainData.lon) : null;
+        if (mainLatLng && (searchPoint.distanceTo(mainLatLng) <= threshold)) {
             const wpPopupContent = popup.getContent() as string;
             moreInfo =  `
     <details style="margin-top:4px;">
@@ -475,8 +478,12 @@ function selectMarker(marker: MarkerType): void {
 
     const currentLatLng = locationMarker.getLatLng();
     const isInitialLocation = currentLatLng.lat === 0 && currentLatLng.lng === 0;
-    const distance = isInitialLocation ? -1 : marker.getLatLng().distanceTo(currentLatLng);
-    const bearing = getBearing(currentLatLng, marker.getLatLng());
+
+    // With markerCluster, the marker position may be different than the position in the data!
+    const dataLatLng = L.latLng(data.lat, data.lon);
+
+    const distance = isInitialLocation ? -1 : dataLatLng.distanceTo(currentLatLng);
+    const bearing = getBearing(currentLatLng, dataLatLng);
 
     const solverCode = getSolverCode(data.name); // or: marker.waypointName
     const solverCodeInHtml = getSolverCodeInHtml(solverCode);
@@ -485,7 +492,7 @@ function selectMarker(marker: MarkerType): void {
     const popupContent = preparePopupContent(data, solverCodeInHtml, distance, bearing);
 
     popup
-        .setLatLng(marker.getLatLng())
+        .setLatLng(marker.getLatLng()) // use actual marker position for the popup position
         .setContent(popupContent);
 
     if (solverCode) {
@@ -510,13 +517,16 @@ function selectSolverMarker(marker: MarkerType): void {
 
     const currentLatLng = locationMarker.getLatLng();
     const isInitialLocation = currentLatLng.lat === 0 && currentLatLng.lng === 0;
-    const distance = isInitialLocation ? -1 : marker.getLatLng().distanceTo(currentLatLng);
-    const bearing = getBearing(currentLatLng, marker.getLatLng());
-
+    
+    // With markerCluster, the marker position may be different than the position in the data!
+    const dataLatLng = L.latLng(data.lat, data.lon);
+    const distance = isInitialLocation ? -1 : dataLatLng.distanceTo(currentLatLng);
+    const bearing = getBearing(currentLatLng, dataLatLng);
+  
     const popupContent = preparePopupContent(data, '', distance, bearing);
 
     solverPopup
-        .setLatLng(marker.getLatLng())
+        .setLatLng(marker.getLatLng()) // use actual marker position for the popup position
         .setContent(popupContent);
 }
 
@@ -809,8 +819,12 @@ function locationShowPosition(position: GeolocationPosition) {
         const marker = getMarkerFromPopup(popup);
         const data = waypointDataMap[marker.waypointName];
         const currentLatLng = locationMarker.getLatLng();
-        const distance = marker.getLatLng().distanceTo(currentLatLng);
-        const bearing = getBearing(currentLatLng, marker.getLatLng());
+
+        // With markerCluster, the marker position may be different than the position in the data!
+        const dataLatLng = L.latLng(data.lat, data.lon);
+        const distance = dataLatLng.distanceTo(currentLatLng);
+        const bearing = getBearing(currentLatLng, dataLatLng);
+
         const popupContent = preparePopupContent(data, '', distance, bearing);
         popup.setContent(popupContent);
     }
