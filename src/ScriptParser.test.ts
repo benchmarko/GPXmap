@@ -394,6 +394,7 @@ describe('ScriptParser', () => {
             '"abc" <> "abc"': "false",
 
             'mid("abcABCabc",3,5)': "cABCa",
+            'mid("abcABCabc",3)': "cABCabc",
 
             'uc("abcäöüABC")': "ABCÄÖÜABC",
 

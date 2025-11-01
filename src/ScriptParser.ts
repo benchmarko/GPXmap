@@ -786,9 +786,13 @@ export default class ScriptParser {
 
 			len: (s: string) => String(s).length,
 
-			// mid(s, index, len) substr with positions starting with 1
-			mid: function (s: string, start: number, length: number) {
-				return String(s).substr(start - 1, length);
+			// mid(s, index, len?) substr with positions starting with 1
+			mid_optionalArgs: () => 1,
+			mid: function (s: string, start: number, length?: number) {
+				if (typeof length === "undefined") {
+					return String(s).substring(start - 1);
+				}
+				return String(s).substring(start - 1, start - 1 + length);
 			},
 
 			// mod: or should it be... https://stackoverflow.com/questions/4467539/javascript-modulo-not-behaving
