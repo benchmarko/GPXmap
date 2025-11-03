@@ -19,8 +19,8 @@ const Utils: Utils = {
 export default class LatLng {
     private lat: number;
     private lng: number;
-    private format?: string;
     private comment?: string;
+    private format?: string;
     private error?: string;
 
     constructor(lat?: number | string, lng?: number | string) {
@@ -44,8 +44,20 @@ export default class LatLng {
     }
 
     clone(): LatLng {
-        const clone = new LatLng();
-        Object.assign(clone, this);
+        const clone = new LatLng(
+            this.lat,
+            this.lng
+        );
+        if (this.comment !== undefined) {
+            clone.setComment(this.comment);
+        }
+        if (this.error !== undefined) {
+            clone.setError(this.error);
+        }
+        if (this.format !== undefined) {
+            clone.setFormat(this.format);
+        }
+        //Object.assign(clone, this);
         return clone;
     }
 
@@ -91,7 +103,7 @@ export default class LatLng {
     }
 
     toString(): string {
-        return Object.values(this).join(",");
+        return [this.lat, this.lng, this.comment, this.format, this.error].join(",");
     }
 
     distanceTo(point: LatLng): number {
