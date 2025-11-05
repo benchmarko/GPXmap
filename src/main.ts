@@ -20,14 +20,20 @@ export type ConfigEntryType = string | number | boolean;
 type ConfigType = {
     debug: number;
     file: string,
+    keepView: boolean;
     search: string;
+    showLocation: boolean;
 };
 
-const config: ConfigType = {
+
+const defaultConfig: ConfigType = {
     debug: 0,
     file: "",
-    search: ""
+    keepView: false,
+    search: "",
+    showLocation: false
 };
+const config = { ...defaultConfig };
 
 
 type WaypointDataType = {
@@ -76,6 +82,41 @@ function debounce(fn: (e: Event) => void, delay: number) {
         clearTimeout(timeoutId);
         timeoutId = window.setTimeout(() => fn(e), delay);
     };
+}
+
+function getDefaultConfigMap(): ConfigType {
+    return defaultConfig;
+}
+
+function getConfigMap(): ConfigType {
+    return config;
+}
+
+
+function syncInputState(inputId: string, configValue: boolean): void {
+        const input = window.document.getElementById(inputId) as HTMLInputElement;
+        if (input.checked !== configValue) {
+            input.checked = configValue;
+            input.dispatchEvent(new Event("change"));
+        }
+    }
+
+function updateConfigParameter(name: string, value: string | boolean) {
+    const configAsRecord = getConfigMap() as Record<string, unknown>;
+    const defaultConfigAsRecord = getDefaultConfigMap() as Record<string, unknown>;
+
+    if (!(name in configAsRecord)) {
+        console.error("updateConfigParameter: Unknown key:", name);
+    }
+    configAsRecord[name] = value;
+
+    const url = new URL(window.location.href);
+    if (configAsRecord[name] !== defaultConfigAsRecord[name]) {
+        url.searchParams.set(name, String(value));
+    } else {
+        url.searchParams.delete(name);
+    }
+    history.pushState({}, "", url.href);
 }
 
 function setButtonDisabled(id: string, disabled: boolean) {
@@ -292,9 +333,9 @@ function getBearing(from: L.LatLng, to: L.LatLng): number {
 
 function preparePopupContent(data: WaypointDataType, solverCodeInHtml: string, distance: number, bearing: number): string {
     let moreInfo = '';
- 
+
     if (data.cacheInfo) {
-       moreInfo =  `
+        moreInfo = `
     <details style="margin-top:4px;">
         <summary>More info</summary>
         <div style="margin-top:4px;">
@@ -311,7 +352,7 @@ function preparePopupContent(data: WaypointDataType, solverCodeInHtml: string, d
         const mainLatLng = mainData ? L.latLng(mainData.lat, mainData.lon) : null;
         if (mainLatLng && (searchPoint.distanceTo(mainLatLng) <= threshold)) {
             const wpPopupContent = popup.getContent() as string;
-            moreInfo =  `
+            moreInfo = `
     <details style="margin-top:4px;">
         <summary>Marker ${selectedMarker.waypointName}</summary>
         <div style="margin-top:4px;">
@@ -329,7 +370,7 @@ function preparePopupContent(data: WaypointDataType, solverCodeInHtml: string, d
     const distanceStr = distance >= 0 ? `<br>Distance: ${formatDistance(distance)} ${getDirection(bearing)} (${bearing.toFixed(0)}°)` : '';
     const name = data.name;
     const nameStr = name.startsWith("GC") ? `<a href="https://coord.info/${name}" target="_blank">${name}</a>` : name;
-    
+
     return `
 <strong>${nameStr}</strong><br>
 <span>${desc}</span><br>
@@ -433,7 +474,7 @@ function parseSolverCode(input: string, variables: Record<string, ValueType>) {
         },
         set: (name: string, value: ValueType) => {
             variables[name] = value;
-        } 
+        }
     }
 
     try {
@@ -524,12 +565,12 @@ function selectSolverMarker(marker: MarkerType): void {
 
     const currentLatLng = locationMarker.getLatLng();
     const isInitialLocation = currentLatLng.lat === 0 && currentLatLng.lng === 0;
-    
+
     // With markerCluster, the marker position may be different than the position in the data!
     const dataLatLng = L.latLng(data.lat, data.lon);
     const distance = isInitialLocation ? -1 : dataLatLng.distanceTo(currentLatLng);
     const bearing = getBearing(currentLatLng, dataLatLng);
-  
+
     const popupContent = preparePopupContent(data, '', distance, bearing);
 
     solverPopup
@@ -678,7 +719,7 @@ async function onFileInputChange(event: Event): Promise<void> {
 
     // dataTransfer for drag&drop (with event.type="drop"), target.files for file input 
     const dataTransfer = (event as DragEvent).dataTransfer;
-	const files = dataTransfer ? dataTransfer.files : (event.target as HTMLInputElement).files;
+    const files = dataTransfer ? dataTransfer.files : (event.target as HTMLInputElement).files;
     const inputElement = !dataTransfer ? (event.target as HTMLInputElement) : null;
 
     if (!files || files.length === 0) {
@@ -708,9 +749,10 @@ async function onFileInputChange(event: Event): Promise<void> {
                     // We expect somewhere in the .js file: GPXmap.addItem("<filename>", `<content>`), maybe spanning multiple lines. Filename can also have extension, e.g. file.zip.b64
                     const result = /GPXmap\.addItem\("([^"]+)", `\s*([^`]*)`\)/.exec(text);
                     if (result) {
-                        fileName = result[1];
+                        // Note: Since we cannot get the full path, it does  not make sense to set updateConfigParameter("file", fileName)
+                        const itemFileName = result[1];
                         text = result[2];
-                        addItem(fileName, text);
+                        addItem(itemFileName, text);
                     } else {
                         throw new Error("onFileInputChange: GPXmap.addItem not found in JS file " + fileName);
                     }
@@ -721,11 +763,11 @@ async function onFileInputChange(event: Event): Promise<void> {
                     }
                     if (fileName.endsWith('.zip')) {
                         const binaryData = new Uint8Array(text.split('').map(c => c.charCodeAt(0)));
-                        const messages = processZipFile(binaryData, file.name);
+                        const messages = processZipFile(binaryData, fileName);
                         infoHtml += messages.map((message) => `<span>${message}</span><br>\n`).join('');
                     } else { //if (fileName.endsWith('.gpx')) {
                         // Process GPX file
-                        const message = parseGpxFile(text, file.name);
+                        const message = parseGpxFile(text, fileName);
                         infoHtml += `<span>${message}</span><br>\n`;
                     }
                 }
@@ -814,6 +856,28 @@ function getMarkerFromPopup(popup: L.Popup) {
     return (popup as L.Popup & { _source: MarkerType })._source; // fast hack
 }
 
+
+function onWaypointSearchInput(event: Event): void {
+    const waypointSearchInput = event.target as HTMLInputElement;
+    filterWaypoints(waypointSearchInput.value);
+    asyncDelay(() => {
+        updateConfigParameter("search", waypointSearchInput.value);
+    }, 1500);
+}
+
+
+function onWwaypointSearchClearClick(_event: Event): void {
+    const waypointSearch = document.getElementById('waypointSearch') as HTMLInputElement;
+    waypointSearch.value = '';
+    waypointSearch.dispatchEvent(new Event("input"));
+}
+
+
+function onKeepViewInputChange(event: Event): void {
+    const keepViewInput = event.target as HTMLInputElement;
+    updateConfigParameter("keepView", keepViewInput.checked);
+}
+
 // *** start location service
 
 function locationShowPosition(position: GeolocationPosition) {
@@ -872,12 +936,14 @@ const locationMarker = L.marker([0, 0], { icon: getIcon('Location') });
 const locationPopup = L.popup();
 
 function onShowLocationInputChange(event: Event): void {
+    const showLocationInput = event.target as HTMLInputElement;
+    updateConfigParameter("showLocation", showLocationInput.checked);
+
     if (!("geolocation" in navigator)) {
         console.warn("Geolocation is not supported by this browser.");
         return
     }
 
-    const showLocationInput = event.target as HTMLInputElement;
     if (showLocationInput.checked) {
         locationWatchId = navigator.geolocation.watchPosition(
             (position) => locationShowPosition(position),
@@ -1037,7 +1103,7 @@ function main(): void {
     if (config.debug >= 10) {
         debugRedirectConsoleToWaypointInfo();
     }
-    
+
     map.setView([0, 0], 2);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap'
@@ -1063,19 +1129,14 @@ function main(): void {
 
     const waypointSearch = document.getElementById('waypointSearch') as HTMLInputElement;
     waypointSearch.addEventListener('input', debounce((e) => {
-        const value = (e.target as HTMLInputElement).value;
-        filterWaypoints(value);
+        onWaypointSearchInput(e);
     }, 400));
 
-    if (config.search) {
-        waypointSearch.value = config.search;
-    }
-
     const waypointSearchClear = document.getElementById('waypointSearchClear') as HTMLButtonElement;
-    waypointSearchClear.addEventListener('click', () => {
-        waypointSearch.value = '';
-        filterWaypoints(waypointSearch.value);
-    });
+    waypointSearchClear.addEventListener('click', onWwaypointSearchClearClick);
+
+    const keepViewInput = document.getElementById('keepViewInput') as HTMLInputElement;
+    keepViewInput.addEventListener('change', onKeepViewInputChange);
 
     const showLocationInput = document.getElementById('showLocationInput') as HTMLInputElement;
     showLocationInput.addEventListener('change', onShowLocationInputChange);
@@ -1099,17 +1160,26 @@ function main(): void {
 
     polylineGroup.addTo(map);
 
+    // Sync UI state with config
+    syncInputState("keepViewInput", config.keepView);
+    syncInputState("showLocationInput", config.showLocation);
+
     asyncDelay(() => {
+        if (waypointSearch.value !== config.search) {
+            waypointSearch.value = config.search;
+            waypointSearch.dispatchEvent(new Event("input"));
+        }
         if (config.file) {
             const scriptName = config.file;
             const key = config.file;
             loadScript(scriptName, key).catch((e) => { console.error(e) });
         } else {
             loadWaypointsFromLocalStorage();
-            const waypointSearch = document.getElementById('waypointSearch') as HTMLInputElement;
             filterWaypoints(waypointSearch.value);
         }
     }, 10);
 }
 
-main();
+window.onload = () => {
+    main();
+}
