@@ -345,14 +345,8 @@ function preparePopupContent(data: WaypointDataType, solverCodeInHtml: string, d
         </div>
     </details>`;
     } else if (data.type === 'Solver' && selectedMarker) {
-        // With markerCluster, the marker position may be different than the position in the data!
-        const searchPoint = L.latLng(data.lat, data.lon);
-        const threshold = 1; // threshold in meters
-        const mainData = waypointDataMap[selectedMarker.waypointName];
-        const mainLatLng = mainData ? L.latLng(mainData.lat, mainData.lon) : null;
-        if (mainLatLng && (searchPoint.distanceTo(mainLatLng) <= threshold)) {
-            const wpPopupContent = popup.getContent() as string;
-            moreInfo = `
+        const wpPopupContent = popup.getContent() as string;
+        moreInfo = `
     <details style="margin-top:4px;">
         <summary>Marker ${selectedMarker.waypointName}</summary>
         <div style="margin-top:4px;">
@@ -361,19 +355,18 @@ function preparePopupContent(data: WaypointDataType, solverCodeInHtml: string, d
             </div>
         </div>
     </details>`;
-        }
-
     }
 
     const dmm = position2dmm(data.lat, data.lon);
     const desc = insertNewlineAtLastMatch(insertNewlineAtLastMatch(data.desc, ' by ', true), ',', false);
+    const descStr = desc ? `<span>${desc}</span><br>`: '';
     const distanceStr = distance >= 0 ? `<br>Distance: ${formatDistance(distance)} ${getDirection(bearing)} (${bearing.toFixed(0)}°)` : '';
     const name = data.name;
     const nameStr = name.startsWith("GC") ? `<a href="https://coord.info/${name}" target="_blank">${name}</a>` : name;
 
     return `
 <strong>${nameStr}</strong><br>
-<span>${desc}</span><br>
+${descStr}
 <small>${dmm}${distanceStr}</small>
 ${moreInfo}
 `;
@@ -385,7 +378,7 @@ function getWaypointFromLocalStorage(key: string): WaypointDataType | undefined 
         try {
             const data = JSON.parse(storedData) as Partial<WaypointDataType>;
             if (key !== data.name) {
-                console.warn("getWaypointFromLocalStorage: Key and name mismatch for key ", key, data.name);
+                console.warn("getWaypointFromLocalStorage: Key", key, "does not match name ", data.name);
                 return undefined;
             }
             const wp: WaypointDataType = {
