@@ -338,7 +338,7 @@ describe('LatLng', () => {
             };
             const sTest = ""; // unknown format
 
-            let oLatLng = new LatLng(oPos.lat, oPos.lng);
+            const oLatLng = new LatLng(oPos.lat, oPos.lng);
             let sPos = oLatLng.toFormattedString("x1"); //bSuppressWarnings
             expect(sPos).toBe(sTest);
 

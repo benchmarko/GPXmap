@@ -382,18 +382,26 @@ ${moreInfo}
 function getWaypointFromLocalStorage(key: string): WaypointDataType | undefined {
     const storedData = window.localStorage.getItem(key);
     if (storedData) {
-        const data = JSON.parse(storedData) as Partial<WaypointDataType>;
-        const wp: WaypointDataType = {
-            name: data.name || '',
-            lat: Number(data.lat) || 0,
-            lon: Number(data.lon) || 0,
-            type: data.type || '',
-            desc: data.desc || '',
-            cacheInfo: data.cacheInfo || '',
-            solverCode: data.solverCode || '',
-            solverCodeEdited: data.solverCodeEdited,
-        };
-        return wp;
+        try {
+            const data = JSON.parse(storedData) as Partial<WaypointDataType>;
+            if (key !== data.name) {
+                console.warn("getWaypointFromLocalStorage: Key and name mismatch for key ", key, data.name);
+                return undefined;
+            }
+            const wp: WaypointDataType = {
+                name: data.name || '',
+                lat: Number(data.lat) || 0,
+                lon: Number(data.lon) || 0,
+                type: data.type || '',
+                desc: data.desc || '',
+                cacheInfo: data.cacheInfo || '',
+                solverCode: data.solverCode || '',
+                solverCodeEdited: data.solverCodeEdited,
+            };
+            return wp;
+        } catch (e) {
+            console.warn("getWaypointFromLocalStorage: Cannot parse data for key ", key, String(e));
+        }
     }
     return undefined;
 }
@@ -866,7 +874,7 @@ function onWaypointSearchInput(event: Event): void {
 }
 
 
-function onWwaypointSearchClearClick(_event: Event): void {
+function onWwaypointSearchClearClick(): void {
     const waypointSearch = document.getElementById('waypointSearch') as HTMLInputElement;
     waypointSearch.value = '';
     waypointSearch.dispatchEvent(new Event("input"));
