@@ -916,20 +916,15 @@ function locationShowPosition(position: GeolocationPosition) {
 }
 
 function locationHandleError(error: GeolocationPositionError) {
-    switch (error.code) {
-        case error.PERMISSION_DENIED:
-            console.error("User denied the request for Geolocation.");
-            break;
-        case error.POSITION_UNAVAILABLE:
-            console.error("Location information is unavailable.");
-            break;
-        case error.TIMEOUT:
-            console.error("The request to get user location timed out.");
-            break;
-        default:
-            console.error("An unknown error occurred.");
-            break;
-    }
+    const code2ErrorMap: Record<number, string> = {
+        [GeolocationPositionError.PERMISSION_DENIED]: "PERMISSION_DENIED",
+        [GeolocationPositionError.POSITION_UNAVAILABLE]: "POSITION_UNAVAILABLE",
+        [GeolocationPositionError.TIMEOUT]: "TIMEOUT"
+    };
+    const errorCodeString = error.code in code2ErrorMap ? code2ErrorMap[error.code] : "";
+    const errorMessage = `locationHandleError: ${error.code} ${errorCodeString} - ${error.message}`
+    console.error(errorMessage);
+    alert(errorMessage);   
 }
 
 let locationWatchId: number;
@@ -949,7 +944,10 @@ function onShowLocationInputChange(event: Event): void {
         locationWatchId = navigator.geolocation.watchPosition(
             (position) => locationShowPosition(position),
             locationHandleError,
-            { enableHighAccuracy: true }
+            {
+                enableHighAccuracy: true,
+                timeout: 10000
+            }
         );
     } else {
         navigator.geolocation.clearWatch(locationWatchId);
