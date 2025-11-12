@@ -331,7 +331,18 @@ function getBearing(from: L.LatLng, to: L.LatLng): number {
     return (toDeg(brng) + 360) % 360; // Normalize to 0-360
 }
 
-function preparePopupContent(data: WaypointDataType, solverCodeInHtml: string, distance: number, bearing: number): string {
+function calculateDistanceBearing(data: WaypointDataType) {
+    const currentLatLng = locationMarker.getLatLng();
+    const isInitialLocation = currentLatLng.lat === 0 && currentLatLng.lng === 0;
+
+    // With markerCluster, the marker position may be different than the position in the data!
+    const dataLatLng = L.latLng(data.lat, data.lon);
+    const distance = isInitialLocation ? -1 : dataLatLng.distanceTo(currentLatLng);
+    const bearing = isInitialLocation ? -1 : getBearing(currentLatLng, dataLatLng);
+    return { distance, bearing };
+}
+
+function preparePopupContent(data: WaypointDataType, solverCodeInHtml: string): string {
     let moreInfo = '';
 
     if (data.cacheInfo) {
@@ -357,15 +368,21 @@ function preparePopupContent(data: WaypointDataType, solverCodeInHtml: string, d
     </details>`;
     }
 
+    const filterButtonStr = data.type !== 'Solver' ? `
+<span style="float:right;">
+    <button id="popupSetFilter" title="Set Search Filter" data-name="${data.name}">F</button>
+</span>` : '';
+
     const dmm = position2dmm(data.lat, data.lon);
     const desc = insertNewlineAtLastMatch(insertNewlineAtLastMatch(data.desc, ' by ', true), ',', false);
     const descStr = desc ? `<span>${desc}</span><br>`: '';
+    const {distance, bearing} = calculateDistanceBearing(data);
     const distanceStr = distance >= 0 ? `<br>Distance: ${formatDistance(distance)} ${getDirection(bearing)} (${bearing.toFixed(0)}°)` : '';
     const name = data.name;
     const nameStr = name.startsWith("GC") ? `<a href="https://coord.info/${name}" target="_blank">${name}</a>` : name;
 
     return `
-<strong>${nameStr}</strong><br>
+<strong>${nameStr}</strong>${filterButtonStr}<br>
 ${descStr}
 <small>${dmm}${distanceStr}</small>
 ${moreInfo}
@@ -432,10 +449,11 @@ function getSolverCodeInHtml(solverCode: string) {
     return '';
 }
 
-function prepareInfoContent(data: WaypointDataType, solverCodeInHtml: string, distance: number, bearing: number): string {
+function prepareInfoContent(data: WaypointDataType, solverCodeInHtml: string): string {
     const cacheInfo = `<br>\n${data.cacheInfo || ''}${solverCodeInHtml}<br>\n`;
 
     const dmm = position2dmm(data.lat, data.lon);
+    const {distance, bearing} = calculateDistanceBearing(data);
     const distanceStr = distance >= 0 ? `Distance: ${formatDistance(distance)} ${getDirection(bearing)} (${bearing.toFixed(0)}°)<br>\n` : ''
     const name = data.name;
     const nanmeStr = name.startsWith("GC") ? `<a href="https://coord.info/${name}" target="_blank">${name}</a>` : name;
@@ -518,31 +536,20 @@ function selectMarker(marker: MarkerType): void {
     setButtonDisabled('saveButton', true); // TODO: do we need to save something?
     setButtonDisabled('cancelButton', true);
 
-    const currentLatLng = locationMarker.getLatLng();
-    const isInitialLocation = currentLatLng.lat === 0 && currentLatLng.lng === 0;
-
-    // With markerCluster, the marker position may be different than the position in the data!
-    const dataLatLng = L.latLng(data.lat, data.lon);
-
-    const distance = isInitialLocation ? -1 : dataLatLng.distanceTo(currentLatLng);
-    const bearing = getBearing(currentLatLng, dataLatLng);
-
     const solverCode = getSolverCode(data.name); // or: marker.waypointName
     const solverCodeInHtml = getSolverCodeInHtml(solverCode);
-    let infoContent = prepareInfoContent(data, solverCodeInHtml, distance, bearing);
+    const infoContent = prepareInfoContent(data, solverCodeInHtml);
+    // popupContent will be set during popup open
 
-    const popupContent = preparePopupContent(data, solverCodeInHtml, distance, bearing);
+    popup.setLatLng(marker.getLatLng()); // use actual marker position for the popup position
 
-    popup
-        .setLatLng(marker.getLatLng()) // use actual marker position for the popup position
-        .setContent(popupContent);
-
+    let solverResult = '';
     if (solverCode) {
         const variables: Record<string, string | number> = {};
         const text = parseSolverCode(solverCode, variables);
-        infoContent += `<br>Solver Result:<br>`;
+        solverResult += `<br>Solver Result:<br>`;
         if (text) {
-            infoContent += text.replace(/\n/g, '<br>\n');;
+            solverResult += text.replace(/\n/g, '<br>\n');;
         }
         const solverPoints = Object.entries(variables).filter(([key]) => key.startsWith("$"));
         const solverMarkersData = prepareSolverMarkersData(solverPoints);
@@ -550,7 +557,7 @@ function selectMarker(marker: MarkerType): void {
         setPolyline(solverMarkersData);
     }
 
-    setWaypointInfoHtml(infoContent);
+    setWaypointInfoHtml(infoContent + solverResult);
 }
 
 function selectSolverMarker(marker: MarkerType): void {
@@ -564,19 +571,10 @@ function selectSolverMarker(marker: MarkerType): void {
         return;
     }
 
-    const currentLatLng = locationMarker.getLatLng();
-    const isInitialLocation = currentLatLng.lat === 0 && currentLatLng.lng === 0;
-
-    // With markerCluster, the marker position may be different than the position in the data!
-    const dataLatLng = L.latLng(data.lat, data.lon);
-    const distance = isInitialLocation ? -1 : dataLatLng.distanceTo(currentLatLng);
-    const bearing = getBearing(currentLatLng, dataLatLng);
-
-    const popupContent = preparePopupContent(data, '', distance, bearing);
-
+    const solverPopupContent = preparePopupContent(data, '');
     solverPopup
         .setLatLng(marker.getLatLng()) // use actual marker position for the popup position
-        .setContent(popupContent);
+        .setContent(solverPopupContent);
 }
 
 function clearSolverLayers(): void {
@@ -766,8 +764,7 @@ async function onFileInputChange(event: Event): Promise<void> {
                         const binaryData = new Uint8Array(text.split('').map(c => c.charCodeAt(0)));
                         const messages = processZipFile(binaryData, fileName);
                         infoHtml += messages.map((message) => `<span>${message}</span><br>\n`).join('');
-                    } else { //if (fileName.endsWith('.gpx')) {
-                        // Process GPX file
+                    } else { // assume .gpx
                         const message = parseGpxFile(text, fileName);
                         infoHtml += `<span>${message}</span><br>\n`;
                     }
@@ -879,6 +876,40 @@ function onKeepViewInputChange(event: Event): void {
     updateConfigParameter("keepView", keepViewInput.checked);
 }
 
+/*
+TODO: debug level input
+function onDebugLevelInputChange(event: Event): void {
+    const debugLevelInput = event.target as HTMLInputElement;
+    const level = parseInt(debugLevelInput.value, 10);
+    if (!isNaN(level)) {
+        updateConfigParameter("debug", level);
+    }
+}
+*/
+
+function onPopupSetFilterClick(event: Event): void {
+    const button = event.target as HTMLButtonElement;
+    const waypointName = button.getAttribute('data-name');
+    if (waypointName) {
+        const waypointSearch = document.getElementById('waypointSearch') as HTMLInputElement;
+        waypointSearch.value = waypointName;
+        waypointSearch.dispatchEvent(new Event('input'));
+    }
+}
+
+function onPopupOpen(popupEvent: L.PopupEvent) {
+    const marker = popupEvent.propagatedFrom as MarkerType;
+    const data = waypointDataMap[marker.waypointName];
+    const solverCodeInHtml = getSolverCodeInHtml(getSolverCode(data.name));
+    const popupContent = preparePopupContent(data, solverCodeInHtml);
+    popupEvent.popup.setContent(popupContent);
+
+    const popupSetFilter = document.getElementById('popupSetFilter');
+    if (popupSetFilter) {
+        popupSetFilter.addEventListener('click', onPopupSetFilterClick);
+    }
+}
+
 // *** start location service
 
 function locationShowPosition(position: GeolocationPosition) {
@@ -902,14 +933,8 @@ function locationShowPosition(position: GeolocationPosition) {
     if (popup.isOpen()) {
         const marker = getMarkerFromPopup(popup);
         const data = waypointDataMap[marker.waypointName];
-        const currentLatLng = locationMarker.getLatLng();
-
-        // With markerCluster, the marker position may be different than the position in the data!
-        const dataLatLng = L.latLng(data.lat, data.lon);
-        const distance = dataLatLng.distanceTo(currentLatLng);
-        const bearing = getBearing(currentLatLng, dataLatLng);
-
-        const popupContent = preparePopupContent(data, '', distance, bearing);
+        const solverCodeInHtml = getSolverCodeInHtml(getSolverCode(data.name));
+        const popupContent = preparePopupContent(data, solverCodeInHtml);
         popup.setContent(popupContent);
     }
     // TODO: update also waypoint info?
@@ -957,7 +982,8 @@ function onShowLocationInputChange(event: Event): void {
         if (popup.isOpen()) { // remove distance from popup...
             const marker = getMarkerFromPopup(popup);
             const data = waypointDataMap[marker.waypointName];
-            const popupContent = preparePopupContent(data, '', -1, -1); // no distance and bearing
+            const solverCodeInHtml = getSolverCodeInHtml(getSolverCode(data.name));
+            const popupContent = preparePopupContent(data, solverCodeInHtml); // distance, bearing should be -1
             popup.setContent(popupContent);
         }
     }
@@ -1109,7 +1135,7 @@ function main(): void {
     }).addTo(map);
 
     waypointGroup.on('click', onWaypointGroupClick);
-    waypointGroup.bindPopup(popup);
+    waypointGroup.bindPopup(popup).on("popupopen", onPopupOpen);
 
     solverGroup.on('click', onSolverGroupClick);
     solverGroup.bindPopup(solverPopup);
